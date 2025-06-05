@@ -1,0 +1,368 @@
+#!/usr/bin/env python3
+import os
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.feature_selection import SelectKBest, f_classif, RFE
+import matplotlib.pyplot as plt
+import seaborn as sns
+import joblib
+from tqdm import tqdm
+import warnings
+warnings.filterwarnings('ignore')
+
+# Import our enhanced feature extraction
+from enhanced_features import extract_dataset_features
+
+class EnhancedEarCanalClassifier:
+    def __init__(self):
+        self.models = {}
+        self.scaler = StandardScaler()
+        self.label_encoder = LabelEncoder()
+        self.feature_selector = None
+        self.best_model = None
+        self.feature_names = None
+        
+    def extract_and_prepare_data(self, recordings_dir='recordings', test_size=0.2):
+        """Extract features and prepare train/test sets."""
+        print("=== Feature Extraction ===")
+        X, y, self.feature_names = extract_dataset_features(recordings_dir)
+        
+        # Encode labels
+        y_encoded = self.label_encoder.fit_transform(y)
+        
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y_encoded, test_size=test_size, random_state=42, stratify=y_encoded
+        )
+        
+        # Scale features
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+        
+        print(f"Training set: {X_train_scaled.shape}")
+        print(f"Test set: {X_test_scaled.shape}")
+        print(f"Number of features: {X_train_scaled.shape[1]}")
+        print(f"Number of users: {len(np.unique(y_encoded))}")
+        
+        return X_train_scaled, X_test_scaled, y_train, y_test
+    
+    def feature_selection(self, X_train, y_train, method='rfe', k=50):
+        """Perform feature selection to reduce dimensionality."""
+        print(f"\n=== Feature Selection ({method.upper()}) ===")
+        
+        if method == 'univariate':
+            # Univariate feature selection
+            self.feature_selector = SelectKBest(score_func=f_classif, k=k)
+        elif method == 'rfe':
+            # Recursive feature elimination with Random Forest
+            rf = RandomForestClassifier(n_estimators=50, random_state=42)
+            self.feature_selector = RFE(estimator=rf, n_features_to_select=k)
+        
+        X_train_selected = self.feature_selector.fit_transform(X_train, y_train)
+        
+        # Get selected feature names
+        if hasattr(self.feature_selector, 'get_support'):
+            selected_features = [self.feature_names[i] for i, selected in 
+                               enumerate(self.feature_selector.get_support()) if selected]
+            print(f"Selected {len(selected_features)} features out of {len(self.feature_names)}")
+            print("\nTop 10 selected features:")
+            for i, feature in enumerate(selected_features[:10]):
+                print(f"{i+1}. {feature}")
+        
+        return X_train_selected
+    
+    def define_models(self):
+        """Define multiple ML models with hyperparameter grids."""
+        self.models = {
+            'random_forest': {
+                'model': RandomForestClassifier(random_state=42),
+                'params': {
+                    'n_estimators': [100, 200, 300],
+                    'max_depth': [10, 20, None],
+                    'min_samples_split': [2, 5, 10],
+                    'min_samples_leaf': [1, 2, 4]
+                }
+            },
+            'gradient_boosting': {
+                'model': GradientBoostingClassifier(random_state=42),
+                'params': {
+                    'n_estimators': [100, 200],
+                    'learning_rate': [0.05, 0.1, 0.2],
+                    'max_depth': [3, 5, 7]
+                }
+            },
+            'svm': {
+                'model': SVC(random_state=42, probability=True),
+                'params': {
+                    'C': [0.1, 1, 10, 100],
+                    'kernel': ['rbf', 'linear'],
+                    'gamma': ['scale', 'auto']
+                }
+            },
+            'knn': {
+                'model': KNeighborsClassifier(),
+                'params': {
+                    'n_neighbors': [3, 5, 7, 9, 11],
+                    'weights': ['uniform', 'distance'],
+                    'metric': ['euclidean', 'manhattan']
+                }
+            },
+            'neural_network': {
+                'model': MLPClassifier(random_state=42, max_iter=1000),
+                'params': {
+                    'hidden_layer_sizes': [(50,), (100,), (50, 50), (100, 50)],
+                    'activation': ['relu', 'tanh'],
+                    'learning_rate_init': [0.001, 0.01]
+                }
+            }
+        }
+    
+    def train_and_optimize(self, X_train, y_train, cv_folds=5):
+        """Train multiple models with hyperparameter optimization."""
+        print("\n=== Model Training and Optimization ===")
+        
+        self.define_models()
+        best_models = {}
+        
+        for model_name, model_config in self.models.items():
+            print(f"\nTraining {model_name}...")
+            
+            # Grid search with cross-validation
+            grid_search = GridSearchCV(
+                model_config['model'],
+                model_config['params'],
+                cv=cv_folds,
+                scoring='accuracy',
+                n_jobs=-1,
+                verbose=0
+            )
+            
+            grid_search.fit(X_train, y_train)
+            
+            best_models[model_name] = {
+                'model': grid_search.best_estimator_,
+                'best_params': grid_search.best_params_,
+                'cv_score': grid_search.best_score_
+            }
+            
+            print(f"Best CV score: {grid_search.best_score_:.4f}")
+            print(f"Best params: {grid_search.best_params_}")
+        
+        return best_models
+    
+    def create_ensemble(self, best_models):
+        """Create an ensemble of the best models."""
+        print("\n=== Creating Ensemble Model ===")
+        
+        # Select top 3 models based on CV score
+        sorted_models = sorted(best_models.items(), 
+                             key=lambda x: x[1]['cv_score'], reverse=True)
+        
+        top_models = []
+        for model_name, model_info in sorted_models[:3]:
+            top_models.append((model_name, model_info['model']))
+            print(f"Including {model_name} (CV: {model_info['cv_score']:.4f})")
+        
+        # Create voting classifier
+        ensemble = VotingClassifier(
+            estimators=top_models,
+            voting='soft'  # Use probabilities for voting
+        )
+        
+        return ensemble
+    
+    def evaluate_models(self, models, X_train, X_test, y_train, y_test):
+        """Evaluate all models and select the best one."""
+        print("\n=== Model Evaluation ===")
+        
+        results = {}
+        
+        for model_name, model_info in models.items():
+            model = model_info['model']
+            model.fit(X_train, y_train)
+            
+            # Predictions
+            y_pred = model.predict(X_test)
+            accuracy = accuracy_score(y_test, y_pred)
+            
+            results[model_name] = {
+                'model': model,
+                'accuracy': accuracy,
+                'predictions': y_pred,
+                'cv_score': model_info['cv_score']
+            }
+            
+            print(f"{model_name:20} - Test Accuracy: {accuracy:.4f}")
+        
+        # Evaluate ensemble
+        print("\nTraining ensemble...")
+        ensemble = self.create_ensemble(models)
+        ensemble.fit(X_train, y_train)
+        ensemble_pred = ensemble.predict(X_test)
+        ensemble_accuracy = accuracy_score(y_test, ensemble_pred)
+        
+        results['ensemble'] = {
+            'model': ensemble,
+            'accuracy': ensemble_accuracy,
+            'predictions': ensemble_pred,
+            'cv_score': ensemble_accuracy  # Use test accuracy as proxy
+        }
+        
+        print(f"{'ensemble':20} - Test Accuracy: {ensemble_accuracy:.4f}")
+        
+        # Select best model
+        best_model_name = max(results.keys(), key=lambda x: results[x]['accuracy'])
+        self.best_model = results[best_model_name]['model']
+        
+        print(f"\nBest model: {best_model_name} (Accuracy: {results[best_model_name]['accuracy']:.4f})")
+        
+        return results, y_test, results[best_model_name]['predictions']
+    
+    def analyze_results(self, results, y_test, y_pred):
+        """Create detailed analysis and visualizations."""
+        print("\n=== Results Analysis ===")
+        
+        # Classification report
+        user_names = self.label_encoder.classes_
+        print("\nDetailed Classification Report:")
+        print(classification_report(y_test, y_pred, target_names=user_names))
+        
+        # Confusion matrix
+        plt.figure(figsize=(12, 8))
+        cm = confusion_matrix(y_test, y_pred)
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                   xticklabels=user_names, yticklabels=user_names)
+        plt.title('Enhanced Model - Confusion Matrix')
+        plt.ylabel('True Label')
+        plt.xlabel('Predicted Label')
+        plt.tight_layout()
+        plt.savefig('enhanced_confusion_matrix.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # Model comparison
+        model_names = list(results.keys())
+        accuracies = [results[name]['accuracy'] for name in model_names]
+        cv_scores = [results[name]['cv_score'] for name in model_names]
+        
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+        
+        # Test accuracies
+        bars1 = ax1.bar(model_names, accuracies, color='skyblue', alpha=0.7)
+        ax1.set_title('Test Accuracy Comparison')
+        ax1.set_ylabel('Accuracy')
+        ax1.set_ylim(0, 1)
+        ax1.tick_params(axis='x', rotation=45)
+        
+        # Add value labels on bars
+        for bar, acc in zip(bars1, accuracies):
+            ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                    f'{acc:.3f}', ha='center', va='bottom')
+        
+        # CV scores
+        bars2 = ax2.bar(model_names, cv_scores, color='lightcoral', alpha=0.7)
+        ax2.set_title('Cross-Validation Score Comparison')
+        ax2.set_ylabel('CV Score')
+        ax2.set_ylim(0, 1)
+        ax2.tick_params(axis='x', rotation=45)
+        
+        # Add value labels on bars
+        for bar, score in zip(bars2, cv_scores):
+            ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                    f'{score:.3f}', ha='center', va='bottom')
+        
+        plt.tight_layout()
+        plt.savefig('enhanced_model_comparison.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # Feature importance (if available)
+        if hasattr(self.best_model, 'feature_importances_'):
+            self.plot_feature_importance()
+    
+    def plot_feature_importance(self):
+        """Plot feature importance for tree-based models."""
+        if hasattr(self.best_model, 'feature_importances_'):
+            # Get selected feature names
+            if self.feature_selector and hasattr(self.feature_selector, 'get_support'):
+                selected_features = [self.feature_names[i] for i, selected in 
+                                   enumerate(self.feature_selector.get_support()) if selected]
+            else:
+                selected_features = self.feature_names
+            
+            # Create importance DataFrame
+            importance_df = pd.DataFrame({
+                'feature': selected_features,
+                'importance': self.best_model.feature_importances_
+            }).sort_values('importance', ascending=False)
+            
+            # Plot top 20 features
+            plt.figure(figsize=(12, 8))
+            top_features = importance_df.head(20)
+            sns.barplot(data=top_features, x='importance', y='feature', palette='viridis')
+            plt.title('Top 20 Most Important Features (Enhanced Model)')
+            plt.xlabel('Feature Importance')
+            plt.tight_layout()
+            plt.savefig('enhanced_feature_importance.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"\nTop 10 Most Important Features:")
+            for i, (_, row) in enumerate(importance_df.head(10).iterrows()):
+                print(f"{i+1:2d}. {row['feature']:30} ({row['importance']:.4f})")
+    
+    def save_model(self, filename_prefix='enhanced_ear_biometric'):
+        """Save the trained model and preprocessing components."""
+        joblib.dump(self.best_model, f'{filename_prefix}_model.joblib')
+        joblib.dump(self.scaler, f'{filename_prefix}_scaler.joblib')
+        joblib.dump(self.label_encoder, f'{filename_prefix}_label_encoder.joblib')
+        
+        if self.feature_selector:
+            joblib.dump(self.feature_selector, f'{filename_prefix}_feature_selector.joblib')
+        
+        # Save feature names
+        with open(f'{filename_prefix}_feature_names.txt', 'w') as f:
+            for feature in self.feature_names:
+                f.write(f"{feature}\n")
+        
+        print(f"\nModel saved with prefix: {filename_prefix}")
+
+def main():
+    """Main training pipeline."""
+    print("Enhanced Ear Canal Biometric Authentication System")
+    print("=" * 60)
+    
+    # Initialize classifier
+    classifier = EnhancedEarCanalClassifier()
+    
+    # Extract and prepare data
+    X_train, X_test, y_train, y_test = classifier.extract_and_prepare_data()
+    
+    # Feature selection
+    X_train_selected = classifier.feature_selection(X_train, y_train, method='rfe', k=80)
+    X_test_selected = classifier.feature_selector.transform(X_test)
+    
+    # Train and optimize models
+    best_models = classifier.train_and_optimize(X_train_selected, y_train)
+    
+    # Evaluate models
+    results, y_test_final, y_pred_final = classifier.evaluate_models(
+        best_models, X_train_selected, X_test_selected, y_train, y_test
+    )
+    
+    # Analyze results
+    classifier.analyze_results(results, y_test_final, y_pred_final)
+    
+    # Save model
+    classifier.save_model()
+    
+    print("\n" + "=" * 60)
+    print("Enhanced training complete!")
+    print("Check the generated plots for detailed analysis.")
+
+if __name__ == "__main__":
+    main() 

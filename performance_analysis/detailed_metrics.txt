@@ -1,0 +1,35 @@
+=== Enhanced Model Performance Report ===
+
+Overall Metrics:
+Overall Accuracy: 0.9833
+Average Confidence: 0.8559
+Total Samples: 180.0000
+Number of Users: 6.0000
+Error Rate: 0.0167
+
+Per-User Metrics:
+              precision    recall  f1-score     support
+Abhi           0.967742  1.000000  0.983607   30.000000
+Ajmal          1.000000  0.966667  0.983051   30.000000
+Deepak.S       0.966667  0.966667  0.966667   30.000000
+Dhanush.P      1.000000  1.000000  1.000000   30.000000
+Hassan         1.000000  0.966667  0.983051   30.000000
+lohith         0.967742  1.000000  0.983607   30.000000
+accuracy       0.983333  0.983333  0.983333    0.983333
+macro avg      0.983692  0.983333  0.983330  180.000000
+weighted avg   0.983692  0.983333  0.983330  180.000000
+
+Confidence Analysis:
+Average Confidence (Correct Predictions): 0.8603
+Average Confidence (Incorrect Predictions): 0.5919
+
+
+Error Analysis:
+Overall Error Rate: 0.0167
+
+Most Common Errors:
+col_0     Abhi  Deepak.S  lohith
+row_0                           
+Ajmal        1         0       0
+Deepak.S     0         0       1
+Hassan       0         1       0
