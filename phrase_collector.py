@@ -6,8 +6,11 @@ import numpy as np
 from utils import (
     record_echo,
     save_recording,
+    save_recording_to_path,  # <-- import the new function
     list_audio_devices
 )
+import os
+from datetime import datetime
 
 # List of test phrases
 TEST_PHRASES = [
@@ -31,6 +34,10 @@ def collect_phrase_samples(user_id: str, num_samples: int = 3, record_duration: 
         num_samples (int): Number of samples per phrase
         record_duration (float): Duration of recording in seconds
     """
+    # Ensure voice subfolder exists
+    voice_dir = os.path.join('recordings', 'voice')
+    os.makedirs(voice_dir, exist_ok=True)
+    
     print(f"\nCollecting {num_samples} samples per phrase for user {user_id}")
     print("Please wear your headphones and stay in a quiet environment.")
     print("You will be prompted to read each phrase.")
@@ -57,11 +64,20 @@ def collect_phrase_samples(user_id: str, num_samples: int = 3, record_duration: 
             recording = record_echo(np.zeros(1), duration=record_duration)  # Empty tone, just record voice
             
             # Save with phrase info
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            # Use phrase snippet for filename clarity
+            phrase_snippet = phrase[:15].replace(' ', '_').replace(',', '')
+            base_filename = f"user_{user_id}_phrase_{phrase_snippet}_{timestamp}_{i+1}"
+            voice_dir = os.path.join('recordings', 'voice')
+            wav_path = os.path.normpath(os.path.join(voice_dir, base_filename + ".wav"))
+            meta_path = os.path.normpath(os.path.join(voice_dir, base_filename + "_meta.json"))
             metadata = {
+                "user_id": user_id,
                 "phrase": phrase,
-                "sample_number": i + 1
+                "sample_number": i + 1,
+                "timestamp": timestamp
             }
-            save_recording(recording, f"{user_id}_phrase_{phrase[:10]}", metadata=metadata)
+            save_recording_to_path(recording, wav_path, meta_path, metadata=metadata)
             
             if i < num_samples - 1:
                 print("Waiting 2 seconds before next sample...")
@@ -95,4 +111,4 @@ def main():
     )
 
 if __name__ == "__main__":
-    main() 
+    main()

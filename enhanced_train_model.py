@@ -29,28 +29,33 @@ class EnhancedEarCanalClassifier:
         self.best_model = None
         self.feature_names = None
         
-    def extract_and_prepare_data(self, recordings_dir='recordings', test_size=0.2):
-        """Extract features and prepare train/test sets."""
-        print("=== Feature Extraction ===")
+    def extract_and_prepare_data(self, recordings_dir='recordings', test_size=0.2, feature_mode='fused'):
+        """
+        Extract features and prepare train/test sets.
+        feature_mode: 'fused', 'echo', or 'voice'
+        """
+        print(f"=== Feature Extraction ({feature_mode}) ===")
         X, y, self.feature_names = extract_dataset_features(recordings_dir)
-        
-        # Encode labels
+        # Filter features by mode
+        if feature_mode == 'echo':
+            echo_cols = [i for i, name in enumerate(self.feature_names) if name.startswith('echo_')]
+            X = X[:, echo_cols]
+            self.feature_names = [self.feature_names[i] for i in echo_cols]
+        elif feature_mode == 'voice':
+            voice_cols = [i for i, name in enumerate(self.feature_names) if name.startswith('voice_')]
+            X = X[:, voice_cols]
+            self.feature_names = [self.feature_names[i] for i in voice_cols]
+        # else: fused (all features)
         y_encoded = self.label_encoder.fit_transform(y)
-        
-        # Split data
         X_train, X_test, y_train, y_test = train_test_split(
             X, y_encoded, test_size=test_size, random_state=42, stratify=y_encoded
         )
-        
-        # Scale features
         X_train_scaled = self.scaler.fit_transform(X_train)
         X_test_scaled = self.scaler.transform(X_test)
-        
         print(f"Training set: {X_train_scaled.shape}")
         print(f"Test set: {X_test_scaled.shape}")
         print(f"Number of features: {X_train_scaled.shape[1]}")
         print(f"Number of users: {len(np.unique(y_encoded))}")
-        
         return X_train_scaled, X_test_scaled, y_train, y_test
     
     def feature_selection(self, X_train, y_train, method='rfe', k=50):
@@ -335,34 +340,23 @@ def main():
     """Main training pipeline."""
     print("Enhanced Ear Canal Biometric Authentication System")
     print("=" * 60)
-    
-    # Initialize classifier
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--feature_mode', choices=['fused', 'echo', 'voice'], default='fused', help='Which features to use: fused, echo, or voice')
+    args = parser.parse_args()
     classifier = EnhancedEarCanalClassifier()
-    
-    # Extract and prepare data
-    X_train, X_test, y_train, y_test = classifier.extract_and_prepare_data()
-    
-    # Feature selection
+    X_train, X_test, y_train, y_test = classifier.extract_and_prepare_data(feature_mode=args.feature_mode)
     X_train_selected = classifier.feature_selection(X_train, y_train, method='rfe', k=80)
     X_test_selected = classifier.feature_selector.transform(X_test)
-    
-    # Train and optimize models
     best_models = classifier.train_and_optimize(X_train_selected, y_train)
-    
-    # Evaluate models
     results, y_test_final, y_pred_final = classifier.evaluate_models(
         best_models, X_train_selected, X_test_selected, y_train, y_test
     )
-    
-    # Analyze results
     classifier.analyze_results(results, y_test_final, y_pred_final)
-    
-    # Save model
     classifier.save_model()
-    
     print("\n" + "=" * 60)
     print("Enhanced training complete!")
     print("Check the generated plots for detailed analysis.")
 
 if __name__ == "__main__":
-    main() 
+    main()

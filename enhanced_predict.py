@@ -4,7 +4,7 @@ import librosa
 import joblib
 import sys
 import pandas as pd
-from enhanced_features import extract_ear_canal_features
+from enhanced_features import extract_multimodal_features
 
 class EnhancedEarCanalPredictor:
     def __init__(self, model_prefix='enhanced_ear_biometric'):
@@ -50,44 +50,32 @@ class EnhancedEarCanalPredictor:
         try:
             # Load audio
             audio, sr = librosa.load(audio_file_path, sr=44100)
-            
-            # Extract enhanced features
-            features = extract_ear_canal_features(audio, sr)
-            
+            # Find metadata path
+            meta_path = audio_file_path.replace('.wav', '_meta.json')
+            # Extract multi-modal features
+            features = extract_multimodal_features(audio, sr, meta_path)
             # Convert to DataFrame to match training format
             feature_df = pd.DataFrame([features])
-            
-            # Handle any NaN values
             feature_df = feature_df.fillna(0)
-            
-            # Convert to numpy array
             feature_vector = feature_df.values
-            
             # Scale features FIRST (before feature selection)
             feature_vector_scaled = self.scaler.transform(feature_vector)
-            
             # Apply feature selection AFTER scaling
             if self.feature_selector:
                 feature_vector_final = self.feature_selector.transform(feature_vector_scaled)
             else:
                 feature_vector_final = feature_vector_scaled
-            
             # Make prediction
             prediction = self.model.predict(feature_vector_final)[0]
             predicted_user = self.label_encoder.inverse_transform([prediction])[0]
-            
             if return_probabilities:
-                # Get prediction probabilities
                 if hasattr(self.model, 'predict_proba'):
                     probabilities = self.model.predict_proba(feature_vector_final)[0]
-                    prob_dict = {user: prob for user, prob in 
-                               zip(self.label_encoder.classes_, probabilities)}
+                    prob_dict = {user: prob for user, prob in zip(self.label_encoder.classes_, probabilities)}
                     return predicted_user, prob_dict
                 else:
                     return predicted_user, None
-            
             return predicted_user
-            
         except Exception as e:
             print(f"Error during prediction: {e}")
             return None
@@ -135,7 +123,7 @@ class EnhancedEarCanalPredictor:
             print(f"Audio samples: {len(audio)}")
             
             # Extract features
-            features = extract_ear_canal_features(audio, sr)
+            features = extract_multimodal_features(audio, sr)
             print(f"Extracted features: {len(features)}")
             
             # Make prediction with confidence
@@ -188,4 +176,4 @@ def main():
             print("Prediction failed")
 
 if __name__ == "__main__":
-    main() 
+    main()

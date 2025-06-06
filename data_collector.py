@@ -7,11 +7,15 @@ from utils import (
     generate_test_tone,
     record_echo,
     save_recording,
+    save_recording_to_path,  # <-- import the new function
     list_audio_devices
 )
+import os
+from datetime import datetime
+import sounddevice as sd  # Add this import for cue beep
 
 def collect_samples(user_id: str, num_samples: int = 20, tone_duration: float = 0.1,
-                   record_duration: float = 1.0, freq: int = 1000):
+                   record_duration: float = 1.0, freq: int = 1000, output_device=None):
     """Collect ear canal echo samples for a user.
     
     Args:
@@ -29,6 +33,10 @@ def collect_samples(user_id: str, num_samples: int = 20, tone_duration: float = 
     # Generate test tone
     tone = generate_test_tone(duration=tone_duration, freq=freq)
     
+    # Ensure echo subfolder exists
+    echo_dir = os.path.join('recordings', 'echo')
+    os.makedirs(echo_dir, exist_ok=True)
+    
     # Collect samples
     for i in tqdm(range(num_samples), desc="Recording samples"):
         print(f"\nSample {i+1}/{num_samples}")
@@ -38,12 +46,26 @@ def collect_samples(user_id: str, num_samples: int = 20, tone_duration: float = 
         time.sleep(1)
         print("1...")
         time.sleep(1)
-        
-        # Record echo
-        echo = record_echo(tone, duration=record_duration)
+        # Play a cue beep (optional, 440 Hz, 0.2s)
+        cue_beep = 0.5 * np.sin(2 * np.pi * 440 * np.linspace(0, 0.2, int(44100 * 0.2), False))
+        sd.play(cue_beep, samplerate=44100, blocking=True)
+        # Now play and record the test tone for echo capture
+        echo = record_echo(tone, duration=record_duration, output_device=output_device)
         
         # Save recording
-        save_recording(echo, user_id)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        base_filename = f"user_{user_id}_echo_{timestamp}_{i+1}"
+        wav_path = os.path.join(echo_dir, base_filename + ".wav")
+        meta_path = os.path.join(echo_dir, base_filename + "_meta.json")
+        metadata = {
+            "user_id": user_id,
+            "timestamp": timestamp,
+            "sample_number": i + 1,
+            "tone_duration": tone_duration,
+            "record_duration": record_duration,
+            "freq": freq
+        }
+        save_recording_to_path(echo, wav_path, meta_path, metadata=metadata)
         
         # Wait between samples
         if i < num_samples - 1:
@@ -58,6 +80,7 @@ def main():
     parser.add_argument("--record_duration", type=float, default=1.0, help="Duration of echo recording in seconds")
     parser.add_argument("--freq", type=int, default=1000, help="Frequency of test tone in Hz")
     parser.add_argument("--list_devices", action="store_true", help="List available audio devices")
+    parser.add_argument("--output_device", type=int, default=None, help="Output device index for playback/recording")
     
     args = parser.parse_args()
     
@@ -73,8 +96,9 @@ def main():
         num_samples=args.samples,
         tone_duration=args.tone_duration,
         record_duration=args.record_duration,
-        freq=args.freq
+        freq=args.freq,
+        output_device=args.output_device
     )
 
 if __name__ == "__main__":
-    main() 
+    main()

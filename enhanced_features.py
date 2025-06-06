@@ -5,6 +5,8 @@ from scipy import signal, stats
 from sklearn.preprocessing import StandardScaler
 import pywt
 from typing import Dict, Tuple
+import json
+import os
 
 def extract_ear_canal_features(audio: np.ndarray, sr: int = 44100) -> Dict[str, float]:
     """
@@ -152,8 +154,8 @@ def extract_ear_canal_features(audio: np.ndarray, sr: int = 44100) -> Dict[str, 
 
 def extract_dataset_features(recordings_dir: str) -> Tuple[np.ndarray, np.ndarray, list]:
     """
-    Extract enhanced features from all recordings in the dataset.
-    
+    Extract enhanced features from all recordings in the dataset, with multi-modal separation.
+    Recursively searches all subfolders (e.g., echo/, voice/).
     Returns:
         features_matrix: N x M matrix where N is samples and M is features
         labels: User labels
@@ -162,41 +164,83 @@ def extract_dataset_features(recordings_dir: str) -> Tuple[np.ndarray, np.ndarra
     import os
     import pandas as pd
     from tqdm import tqdm
-    
     features_list = []
     labels = []
-    
-    # Get all wav files
-    wav_files = [f for f in os.listdir(recordings_dir) if f.endswith('.wav')]
-    
-    print(f"Extracting enhanced features from {len(wav_files)} recordings...")
-    
-    for wav_file in tqdm(wav_files):
-        # Get user ID from filename
+    wav_files = []
+
+    # Recursively find all .wav files in recordings_dir and subfolders (including echo/ and voice/)
+    for root, _, files in os.walk(recordings_dir):
+        for f in files:
+            if f.endswith('.wav'):
+                wav_files.append(os.path.join(root, f))
+    print(f"Extracting enhanced features from {len(wav_files)} recordings (including echo/ and voice/ folders if present)...")
+    for wav_path in tqdm(wav_files):
+        wav_file = os.path.basename(wav_path)
         user_id = wav_file.split('_')[1]
-        
-        # Load audio
-        audio_path = os.path.join(recordings_dir, wav_file)
-        audio, _ = librosa.load(audio_path, sr=44100)
-        
-        # Extract features
-        features = extract_ear_canal_features(audio)
-        
+        meta_path = wav_path.replace('.wav', '_meta.json')
+        audio, _ = librosa.load(wav_path, sr=44100)
+        features = extract_multimodal_features(audio, 44100, meta_path)
         features_list.append(features)
         labels.append(user_id)
-    
-    # Convert to DataFrame for easier handling
     features_df = pd.DataFrame(features_list)
     feature_names = list(features_df.columns)
-    
-    # Handle any NaN values
     features_df = features_df.fillna(0)
-    
     print(f"Extracted {len(feature_names)} features per recording")
     print(f"Total recordings: {len(features_list)}")
     print(f"Users: {len(set(labels))}")
-    
     return features_df.values, np.array(labels), feature_names
+
+def extract_multimodal_features(audio: np.ndarray, sr: int, meta_path: str = None) -> dict:
+    """
+    Extract and separate echo-specific and voice-specific features for multi-modal fusion.
+    Args:
+        audio (np.ndarray): Audio signal
+        sr (int): Sample rate
+        meta_path (str, optional): Path to metadata JSON file
+    Returns:
+        dict: Combined feature dictionary with 'echo_' and 'voice_' prefixes
+    """
+    # Default: assume both modalities unless specified
+    modality = None
+    if meta_path and os.path.exists(meta_path):
+        with open(meta_path, 'r') as f:
+            meta = json.load(f)
+            # Heuristic: if 'phrase' in meta, treat as voice; else echo
+            if 'phrase' in meta and meta['phrase']:
+                modality = 'voice'
+            else:
+                modality = 'echo'
+    # If no meta, fallback to filename heuristic
+    elif meta_path:
+        if 'phrase' in meta_path:
+            modality = 'voice'
+        else:
+            modality = 'echo'
+    # Extract all features
+    all_features = extract_ear_canal_features(audio, sr)
+    echo_features = {}
+    voice_features = {}
+    # Assign features to branches (simple heuristic: resonance for echo, MFCC/LPC/chroma for voice)
+    for k, v in all_features.items():
+        if k.startswith('resonant_') or k.startswith('freq_ratio') or k.startswith('wavelet_'):
+            echo_features['echo_' + k] = v
+        elif k.startswith('mfcc_') or k.startswith('lpc_') or k.startswith('chroma_'):
+            voice_features['voice_' + k] = v
+        else:
+            # Shared or ambiguous features (e.g., spectral, temporal, stats)
+            echo_features['echo_' + k] = v
+            voice_features['voice_' + k] = v
+    # Only keep the relevant branch if modality is known
+    if modality == 'echo':
+        return echo_features
+    elif modality == 'voice':
+        return voice_features
+    else:
+        # If unknown, return both merged
+        combined = {}
+        combined.update(echo_features)
+        combined.update(voice_features)
+        return combined
 
 if __name__ == "__main__":
     # Test feature extraction
@@ -206,4 +250,4 @@ if __name__ == "__main__":
     print(f"Number of features: {len(feature_names)}")
     print("\nFirst 10 features:")
     for i, name in enumerate(feature_names[:10]):
-        print(f"{i+1}. {name}") 
+        print(f"{i+1}. {name}")

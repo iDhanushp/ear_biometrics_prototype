@@ -1,3 +1,7 @@
+# Ear Canal + Voice Biometric Authentication System (Multi-Modal)
+
+**This project uses both ear canal echo and voice features for robust, multi-modal biometric authentication. It is NOT ear-only: both modalities are required for best performance.**
+
 # Ear Canal Acoustic Biometrics
 
 This project implements an acoustic-based biometric authentication system using ear canal resonance patterns. The system uses audio signals to capture unique acoustic signatures from a person's ear canal for secure authentication.
@@ -115,4 +119,4 @@ Below is a step-by-step plan to build an acoustic-based biometric authentication
 - **librosa:** Audio feature extraction.
 - **scikit-learn:** Training classical models.
 - **PyTorch/TensorFlow:** Deep learning (optional).
-- **Flutter:** Mobile app integration. 
+- **Flutter:** Mobile app integration.
