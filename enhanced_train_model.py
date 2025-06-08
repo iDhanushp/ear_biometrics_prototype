@@ -335,28 +335,75 @@ class EnhancedEarCanalClassifier:
                 f.write(f"{feature}\n")
         
         print(f"\nModel saved with prefix: {filename_prefix}")
+    
+    def split_modalities(self, X, feature_names):
+        """Split features into echo-only and voice-only based on feature name prefixes."""
+        echo_indices = [i for i, name in enumerate(feature_names) if name.startswith('echo_')]
+        voice_indices = [i for i, name in enumerate(feature_names) if name.startswith('voice_')]
+        X_echo = X[:, echo_indices]
+        X_voice = X[:, voice_indices]
+        echo_names = [feature_names[i] for i in echo_indices]
+        voice_names = [feature_names[i] for i in voice_indices]
+        return X_echo, echo_names, X_voice, voice_names
 
 def main():
-    """Main training pipeline."""
     print("Enhanced Ear Canal Biometric Authentication System")
     print("=" * 60)
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--feature_mode', choices=['fused', 'echo', 'voice'], default='fused', help='Which features to use: fused, echo, or voice')
-    args = parser.parse_args()
     classifier = EnhancedEarCanalClassifier()
-    X_train, X_test, y_train, y_test = classifier.extract_and_prepare_data(feature_mode=args.feature_mode)
-    X_train_selected = classifier.feature_selection(X_train, y_train, method='rfe', k=80)
-    X_test_selected = classifier.feature_selector.transform(X_test)
-    best_models = classifier.train_and_optimize(X_train_selected, y_train)
-    results, y_test_final, y_pred_final = classifier.evaluate_models(
-        best_models, X_train_selected, X_test_selected, y_train, y_test
-    )
-    classifier.analyze_results(results, y_test_final, y_pred_final)
-    classifier.save_model()
+    # Extract and prepare data (fused)
+    X_train, X_test, y_train, y_test = classifier.extract_and_prepare_data()
+    # Split into echo-only and voice-only
+    X, y, feature_names = extract_dataset_features('recordings')
+    X_echo, echo_names, X_voice, voice_names = classifier.split_modalities(X, feature_names)
+    # Encode labels
+    y_encoded = classifier.label_encoder.fit_transform(y)
+    # Split echo
+    X_echo_train, X_echo_test, y_echo_train, y_echo_test = train_test_split(
+        X_echo, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded)
+    scaler_echo = StandardScaler().fit(X_echo_train)
+    X_echo_train_scaled = scaler_echo.transform(X_echo_train)
+    X_echo_test_scaled = scaler_echo.transform(X_echo_test)
+    # Split voice
+    X_voice_train, X_voice_test, y_voice_train, y_voice_test = train_test_split(
+        X_voice, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded)
+    scaler_voice = StandardScaler().fit(X_voice_train)
+    X_voice_train_scaled = scaler_voice.transform(X_voice_train)
+    X_voice_test_scaled = scaler_voice.transform(X_voice_test)
+    # Fused (already handled by classifier)
+    # Feature selection (RFE, k=80 for all)
+    print("\n[Echo-only] Feature selection...")
+    selector_echo = RFE(RandomForestClassifier(n_estimators=50, random_state=42), n_features_to_select=40)
+    X_echo_train_sel = selector_echo.fit_transform(X_echo_train_scaled, y_echo_train)
+    X_echo_test_sel = selector_echo.transform(X_echo_test_scaled)
+    print("[Voice-only] Feature selection...")
+    selector_voice = RFE(RandomForestClassifier(n_estimators=50, random_state=42), n_features_to_select=40)
+    X_voice_train_sel = selector_voice.fit_transform(X_voice_train_scaled, y_voice_train)
+    X_voice_test_sel = selector_voice.transform(X_voice_test_scaled)
+    # Fused (as before)
+    print("[Fused] Feature selection...")
+    X_train_sel = classifier.feature_selection(X_train, y_train, method='rfe', k=80)
+    X_test_sel = classifier.feature_selector.transform(X_test)
+    # Train and optimize models for each modality
+    print("\n[Echo-only] Training...")
+    best_echo = classifier.train_and_optimize(X_echo_train_sel, y_echo_train)
+    print("[Voice-only] Training...")
+    best_voice = classifier.train_and_optimize(X_voice_train_sel, y_voice_train)
+    print("[Fused] Training...")
+    best_fused = classifier.train_and_optimize(X_train_sel, y_train)
+    # Evaluate and save each
+    print("\n[Echo-only] Evaluation...")
+    results_echo, y_echo_test_final, y_echo_pred = classifier.evaluate_models(best_echo, X_echo_train_sel, X_echo_test_sel, y_echo_train, y_echo_test)
+    classifier.save_model(filename_prefix='enhanced_ear_biometric_echo')
+    print("[Voice-only] Evaluation...")
+    results_voice, y_voice_test_final, y_voice_pred = classifier.evaluate_models(best_voice, X_voice_train_sel, X_voice_test_sel, y_voice_train, y_voice_test)
+    classifier.save_model(filename_prefix='enhanced_ear_biometric_voice')
+    print("[Fused] Evaluation...")
+    results_fused, y_test_final, y_pred_final = classifier.evaluate_models(best_fused, X_train_sel, X_test_sel, y_train, y_test)
+    classifier.save_model(filename_prefix='enhanced_ear_biometric')
+    # Analyze results for fused (main)
+    classifier.analyze_results(results_fused, y_test_final, y_pred_final)
     print("\n" + "=" * 60)
-    print("Enhanced training complete!")
-    print("Check the generated plots for detailed analysis.")
+    print("Enhanced training complete! Check the generated plots for detailed analysis.")
 
 if __name__ == "__main__":
     main()

@@ -152,6 +152,28 @@ def extract_ear_canal_features(audio: np.ndarray, sr: int = 44100) -> Dict[str, 
     
     return features
 
+def extract_multimodal_features(audio: np.ndarray, sr: int = 44100) -> dict:
+    """
+    Extract and prefix both echo and voice features from the input audio.
+    Returns a dictionary with 'echo_' and 'voice_' prefixed features for multi-modal support.
+    """
+    # --- Echo features ---
+    # For echo, use the full signal or a segment (customize as needed)
+    echo_features = extract_ear_canal_features(audio, sr)
+    echo_features = {f'echo_{k}': v for k, v in echo_features.items()}
+
+    # --- Voice features ---
+    # For voice, use MFCCs, spectral, and temporal features (customize as needed)
+    # Here, we use the same function, but in practice you may want to use a different extractor
+    voice_features = extract_ear_canal_features(audio, sr)
+    voice_features = {f'voice_{k}': v for k, v in voice_features.items()}
+
+    # Combine
+    features = {}
+    features.update(echo_features)
+    features.update(voice_features)
+    return features
+
 def extract_dataset_features(recordings_dir: str) -> Tuple[np.ndarray, np.ndarray, list]:
     """
     Extract enhanced features from all recordings in the dataset, with multi-modal separation.
@@ -177,9 +199,14 @@ def extract_dataset_features(recordings_dir: str) -> Tuple[np.ndarray, np.ndarra
     for wav_path in tqdm(wav_files):
         wav_file = os.path.basename(wav_path)
         user_id = wav_file.split('_')[1]
-        meta_path = wav_path.replace('.wav', '_meta.json')
-        audio, _ = librosa.load(wav_path, sr=44100)
-        features = extract_multimodal_features(audio, 44100, meta_path)
+        
+        # Load audio
+        audio_path = os.path.join(recordings_dir, wav_file)
+        audio, _ = librosa.load(audio_path, sr=44100)
+        
+        # Extract multi-modal features
+        features = extract_multimodal_features(audio, sr=44100)
+        
         features_list.append(features)
         labels.append(user_id)
     features_df = pd.DataFrame(features_list)
