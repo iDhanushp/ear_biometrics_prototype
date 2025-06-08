@@ -63,10 +63,25 @@ def collect_samples(user_id: str, num_samples: int = 20, tone_duration: float = 
             "sample_number": i + 1,
             "tone_duration": tone_duration,
             "record_duration": record_duration,
-            "freq": freq
+            "freq": freq,
+            "in_ear": True
         }
         save_recording_to_path(echo, wav_path, meta_path, metadata=metadata)
-        
+
+        # Liveness/occlusion (open-air) sample
+        print("\n[OPTIONAL] Liveness/Occlusion Test: Please REMOVE the earbud and press Enter to record open-air sample...")
+        input()
+        print("Recording open-air (earbud out) sample...")
+        openair_echo = record_echo(tone, duration=record_duration, output_device=output_device)
+        openair_base_filename = f"user_{user_id}_echo_{timestamp}_{i+1}_openair"
+        openair_wav_path = os.path.join(echo_dir, openair_base_filename + ".wav")
+        openair_meta_path = os.path.join(echo_dir, openair_base_filename + "_meta.json")
+        openair_metadata = metadata.copy()
+        openair_metadata["in_ear"] = False
+        save_recording_to_path(openair_echo, openair_wav_path, openair_meta_path, metadata=openair_metadata)
+
+        print("You may re-insert the earbud now.")
+
         # Wait between samples
         if i < num_samples - 1:
             print("Waiting 2 seconds before next sample...")

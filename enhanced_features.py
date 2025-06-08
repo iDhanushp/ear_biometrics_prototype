@@ -7,6 +7,7 @@ import pywt
 from typing import Dict, Tuple
 import json
 import os
+import glob
 
 def extract_ear_canal_features(audio: np.ndarray, sr: int = 44100) -> Dict[str, float]:
     """
@@ -174,6 +175,17 @@ def extract_multimodal_features(audio: np.ndarray, sr: int = 44100) -> dict:
     features.update(voice_features)
     return features
 
+def compute_liveness_score(in_ear_audio, open_air_audio, sr=44100):
+    """
+    Compute a simple liveness score between in-ear and open-air samples.
+    Example: RMS energy difference (can be replaced with more advanced metric).
+    """
+    rms_in_ear = np.mean(librosa.feature.rms(y=in_ear_audio))
+    rms_open_air = np.mean(librosa.feature.rms(y=open_air_audio))
+    # Score: difference normalized by in-ear energy
+    score = (rms_in_ear - rms_open_air) / (rms_in_ear + 1e-6)
+    return score
+
 def extract_dataset_features(recordings_dir: str) -> Tuple[np.ndarray, np.ndarray, list]:
     """
     Extract enhanced features from all recordings in the dataset.
@@ -189,41 +201,41 @@ def extract_dataset_features(recordings_dir: str) -> Tuple[np.ndarray, np.ndarra
     
     features_list = []
     labels = []
-    
-    # Recursively find all .wav files
+    # Recursively find all .wav files and their meta
     wav_files = []
     for root, dirs, files in os.walk(recordings_dir):
         for f in files:
-            if f.endswith('.wav'):
+            if f.endswith('.wav') and '_openair' not in f:
                 wav_files.append(os.path.join(root, f))
-    
-    print(f"Extracting enhanced features from {len(wav_files)} recordings (including echo/ and voice/ folders if present)...")
-    
+    print(f"Extracting enhanced features from {len(wav_files)} in-ear recordings (excluding open-air)...")
     for audio_path in tqdm(wav_files):
-        # Get user ID from filename (works for both echo and voice)
+        # Get user ID and meta path
         fname = os.path.basename(audio_path)
         user_id = fname.split('_')[1]
-        
-        # Load audio
+        meta_path = audio_path.replace('.wav', '_meta.json')
+        # Find corresponding open-air sample
+        openair_path = audio_path.replace('.wav', '_openair.wav')
+        openair_meta_path = audio_path.replace('.wav', '_openair_meta.json')
+        # Load in-ear audio
         audio, _ = librosa.load(audio_path, sr=44100)
-        
         # Extract multi-modal features
-        features = extract_multimodal_features(audio, sr=44100)
-        
+        features = extract_multimodal_features(audio, sr=44100, meta_path=meta_path)
+        # Try to load open-air sample for liveness
+        if os.path.exists(openair_path):
+            openair_audio, _ = librosa.load(openair_path, sr=44100)
+            liveness_score = compute_liveness_score(audio, openair_audio, sr=44100)
+        else:
+            liveness_score = 0.0  # or np.nan
+        features['liveness_score'] = liveness_score
         features_list.append(features)
         labels.append(user_id)
-    
     # Convert to DataFrame for easier handling
     features_df = pd.DataFrame(features_list)
     feature_names = list(features_df.columns)
-    
-    # Handle any NaN values
     features_df = features_df.fillna(0)
-    
     print(f"Extracted {len(feature_names)} features per recording")
     print(f"Total recordings: {len(features_list)}")
     print(f"Users: {len(set(labels))}")
-    
     return features_df.values, np.array(labels), feature_names
 
 def extract_multimodal_features(audio: np.ndarray, sr: int, meta_path: str = None) -> dict:
