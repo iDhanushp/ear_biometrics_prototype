@@ -176,8 +176,8 @@ def extract_multimodal_features(audio: np.ndarray, sr: int = 44100) -> dict:
 
 def extract_dataset_features(recordings_dir: str) -> Tuple[np.ndarray, np.ndarray, list]:
     """
-    Extract enhanced features from all recordings in the dataset, with multi-modal separation.
-    Recursively searches all subfolders (e.g., echo/, voice/).
+    Extract enhanced features from all recordings in the dataset.
+    Recursively searches all subdirectories for .wav files.
     Returns:
         features_matrix: N x M matrix where N is samples and M is features
         labels: User labels
@@ -186,22 +186,25 @@ def extract_dataset_features(recordings_dir: str) -> Tuple[np.ndarray, np.ndarra
     import os
     import pandas as pd
     from tqdm import tqdm
+    
     features_list = []
     labels = []
+    
+    # Recursively find all .wav files
     wav_files = []
-
-    # Recursively find all .wav files in recordings_dir and subfolders (including echo/ and voice/)
-    for root, _, files in os.walk(recordings_dir):
+    for root, dirs, files in os.walk(recordings_dir):
         for f in files:
             if f.endswith('.wav'):
                 wav_files.append(os.path.join(root, f))
+    
     print(f"Extracting enhanced features from {len(wav_files)} recordings (including echo/ and voice/ folders if present)...")
-    for wav_path in tqdm(wav_files):
-        wav_file = os.path.basename(wav_path)
-        user_id = wav_file.split('_')[1]
+    
+    for audio_path in tqdm(wav_files):
+        # Get user ID from filename (works for both echo and voice)
+        fname = os.path.basename(audio_path)
+        user_id = fname.split('_')[1]
         
         # Load audio
-        audio_path = os.path.join(recordings_dir, wav_file)
         audio, _ = librosa.load(audio_path, sr=44100)
         
         # Extract multi-modal features
@@ -209,12 +212,18 @@ def extract_dataset_features(recordings_dir: str) -> Tuple[np.ndarray, np.ndarra
         
         features_list.append(features)
         labels.append(user_id)
+    
+    # Convert to DataFrame for easier handling
     features_df = pd.DataFrame(features_list)
     feature_names = list(features_df.columns)
+    
+    # Handle any NaN values
     features_df = features_df.fillna(0)
+    
     print(f"Extracted {len(feature_names)} features per recording")
     print(f"Total recordings: {len(features_list)}")
     print(f"Users: {len(set(labels))}")
+    
     return features_df.values, np.array(labels), feature_names
 
 def extract_multimodal_features(audio: np.ndarray, sr: int, meta_path: str = None) -> dict:
