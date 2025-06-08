@@ -1,8 +1,19 @@
 # Ear Canal + Voice Biometric Authentication System (Multi-Modal)
 
-**This project implements robust, multi-modal biometric authentication using both ear canal echo and voice features. It supports echo-only, voice-only, fused (early fusion), and late/hybrid fusion modes, with advanced data collection, feature extraction, and model training/prediction.**
+**This project implements robust, multi-modal biometric authentication using both ear canal echo and voice features. It is NOT ear-only: both modalities are required for best performance.**
 
 # Project Documentation
+
+## Recent Changes (2025-06)
+- System is now fully multi-modal: both ear canal echo and voice/phrase are used for authentication and liveness.
+- Data collection scripts (`data_collector.py`, `phrase_collector.py`) refactored for robust path handling, metadata, and multi-modal support.
+- Batch-based liveness/occlusion (open-air) test implemented for echo data collection.
+- Chirp tone, increased tone duration, and RMS thresholding added for improved echo capture.
+- Feature extraction (`enhanced_features.py`) now pairs in-ear/open-air samples, computes liveness score, and includes it as a feature.
+- Analysis script (`analyze_liveness_comparison.py`) compares in-ear vs. open-air samples, visualizes waveforms, automates outlier detection, and adds soft liveness classification (logistic regression).
+- STFT and magnitude are now reused for all spectral features, significantly speeding up feature extraction.
+- All visualizations and analysis results are saved to organized folders for review.
+- Documentation, code, and CLI updated to reflect multi-modal (ear + voice) nature throughout.
 
 ## Table of Contents
 1. [Project Overview](#project-overview)
@@ -23,7 +34,7 @@
 This system leverages both ear canal echo and voice/phrase audio for biometric authentication. It is designed for research and experimental comparison of single-modality and multi-modal (fused) approaches, with robust support for data collection, feature extraction, model training, and prediction.
 
 **Key Features:**
-- Multi-modal: Echo (ear canal) and voice (phrase) biometrics
+- Multi-modal: Echo (ear canal) and voice (phrase) biometrics (NOT ear-only)
 - Flexible: Echo-only, voice-only, fused (early fusion), and late/hybrid fusion
 - Robust: Recursive data handling, explicit file/metadata saving, and error handling
 - Research-ready: CLI and code support for experimental comparison and ablation
@@ -245,3 +256,5 @@ python enhanced_features.py
 ## Conclusion
 
 The system now supports robust, multi-modal authentication using both ear canal echo and voice. All fusion modes (echo-only, voice-only, fused, late/hybrid fusion) are implemented and validated. The architecture is research-ready, with strong performance, flexible experimentation, and clear documentation. Future improvements can further enhance security, accuracy, and real-world robustness.
+
+**Note:** This project is NOT ear-only. Both ear canal echo and voice/phrase modalities are required for best performance and security.

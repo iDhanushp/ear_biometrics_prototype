@@ -2,20 +2,36 @@
 
 **This project uses both ear canal echo and voice features for robust, multi-modal biometric authentication. It is NOT ear-only: both modalities are required for best performance.**
 
-# Ear Canal Acoustic Biometrics
+# Ear Canal + Voice Acoustic Biometrics
 
-This project implements an acoustic-based biometric authentication system using ear canal resonance patterns. The system uses audio signals to capture unique acoustic signatures from a person's ear canal for secure authentication.
+This project implements a multi-modal acoustic-based biometric authentication system using both ear canal resonance patterns (echo) and voice/phrase audio. The system uses audio signals to capture unique acoustic signatures from a person's ear canal and their voice for secure authentication and liveness detection.
+
+## Recent Changes (2025-06)
+- System is now fully multi-modal: both ear canal echo and voice/phrase are used for authentication and liveness.
+- Data collection scripts (`data_collector.py`, `phrase_collector.py`) refactored for robust path handling, metadata, and multi-modal support.
+- Batch-based liveness/occlusion (open-air) test implemented for echo data collection.
+- Chirp tone, increased tone duration, and RMS thresholding added for improved echo capture.
+- Feature extraction (`enhanced_features.py`) now pairs in-ear/open-air samples, computes liveness score, and includes it as a feature.
+- Analysis script (`analyze_liveness_comparison.py`) compares in-ear vs. open-air samples, visualizes waveforms, automates outlier detection, and adds soft liveness classification (logistic regression).
+- STFT and magnitude are now reused for all spectral features, significantly speeding up feature extraction.
+- All visualizations and analysis results are saved to organized folders for review.
+- Documentation, code, and CLI updated to reflect multi-modal (ear + voice) nature throughout.
 
 ## Project Structure
 
 ```
 ear_biometrics_prototype/
-├── recordings/           # Raw audio recordings
-├── data_collector.py    # Script for collecting ear canal audio samples
+├── recordings/           # Raw audio recordings (echo/ and voice/)
+├── data_collector.py    # Script for collecting ear canal echo samples
+├── phrase_collector.py  # Script for collecting voice/phrase samples
+├── enhanced_features.py # Multi-modal feature extraction
+├── enhanced_train_model.py # Multi-modal model training
+├── enhanced_predict.py  # Multi-modal prediction
 ├── utils/              # Utility functions for audio processing
 │   ├── __init__.py
 │   ├── audio.py       # Audio processing functions
 │   └── features.py    # Feature extraction functions
+├── performance_analysis/ # Metrics, confusion matrices, plots
 ├── requirements.txt    # Project dependencies
 └── README.md          # This file
 ```
@@ -35,7 +51,7 @@ pip install -r requirements.txt
 
 ## Data Collection
 
-To collect ear canal audio samples:
+To collect ear canal echo samples:
 
 1. Connect your wired earphones/headset
 2. Run the data collection script:
@@ -43,10 +59,15 @@ To collect ear canal audio samples:
 python data_collector.py --user_id USER_ID --samples 20
 ```
 
+To collect voice/phrase samples:
+```bash
+python phrase_collector.py --user_id USER_ID --samples 3
+```
+
 This will:
-- Play a test tone through the earphones
-- Record the echo response
-- Save the recordings in the `recordings/` directory
+- Play a test tone or prompt for phrase
+- Record the echo response or voice
+- Save the recordings in the `recordings/echo/` or `recordings/voice/` directory, with metadata
 
 ## Hardware Requirements
 
@@ -58,65 +79,27 @@ For best results, use:
 
 Each recording is saved as:
 - WAV file (44.1kHz, 16-bit)
-- Metadata JSON with:
-  - User ID
-  - Timestamp
-  - Recording parameters
+- Metadata JSON with user ID, timestamp, recording parameters, and phrase (for voice)
+
+## Feature Extraction & Model Training
+
+- Multi-modal feature extraction: Both echo and voice features are extracted, with `echo_` and `voice_` prefixes
+- Liveness detection: Open-air (occlusion) samples are paired and scored
+- Model training: Supports echo-only, voice-only, fused, and late/hybrid fusion modes
+- Soft/automated liveness classification and outlier detection included
 
 ## Next Steps
 
-- [ ] Implement feature extraction
-- [ ] Train ML model
-- [ ] Build authentication pipeline
-- [ ] Create Flutter app interface 
+- [x] Implement robust multi-modal feature extraction
+- [x] Train ML models for echo, voice, and fused modalities
+- [x] Add liveness/occlusion detection and soft classification
+- [x] Optimize feature extraction speed (STFT reuse)
+- [ ] Build authentication pipeline and mobile interface (future)
 
 ## Project Roadmap
 
-Below is a step-by-step plan to build an acoustic-based biometric authentication system (using ear canal resonance and voice) from prototype to testing:
+- See `PROJECT_DOCUMENTATION.md` for full details, technical implementation, and future plans.
 
-### STAGE 1: Plan the Prototype
+## Note
 
-- **Hardware (Choose One for Prototyping):**
-  - Wired in-ear headset (3.5mm or USB-C) – low cost, raw access.
-  - USB headset (with mic) – great for laptop testing.
-  - Optional: Audio interface (e.g., Focusrite) – for high-precision audio.
-
-### STAGE 2: Build the Data Collection System
-
-- Use Python (with libraries such as pyaudio or sounddevice) to record echo responses from the ear.
-- Play a short tone (e.g., chirp or sine burst) and record the reflected sound via the mic.
-- Save recordings (WAV) and metadata (JSON) in a "recordings/" folder (e.g., user_id, timestamp, mic_response.wav).
-- Collect 20–30 samples from 10–15 users.
-
-### STAGE 3: Feature Extraction
-
-- Use signal processing (FFT, MFCC, spectral features) to convert each recorded response into ML features.
-- Libraries: librosa, scipy.signal, numpy.
-
-### STAGE 4: Train a Classifier
-
-- Train a model (e.g., KNN, SVM, Random Forest, or CNN) to recognize users based on ear canal echo.
-- Use scikit-learn (for classical models) or TensorFlow/PyTorch (for deep learning).
-
-### STAGE 5: Testing and Evaluation
-
-- Evaluate using metrics (Accuracy, FAR, FRR) and robustness tests (e.g., slight earbud shift, added noise).
-- Use sklearn.metrics (classification_report, confusion_matrix) for evaluation.
-
-### STAGE 6: Expand and Polish
-
-- Build a Flutter front-end (or integrate with a mobile app) to simulate a login screen.
-- Experiment with different impulse sounds (chirps, noise bursts) and consider multi-modal fusion (voice + ear echo).
-- Research privacy and spoofing resistance.
-
-### DATASET
-
-- No public ear-canal acoustic dataset exists; you will need to collect your own data (which is ideal for your hardware and use case).
-
-### TOOLS RECAP
-
-- **Python:** Recording, processing, and ML.
-- **librosa:** Audio feature extraction.
-- **scikit-learn:** Training classical models.
-- **PyTorch/TensorFlow:** Deep learning (optional).
-- **Flutter:** Mobile app integration.
+**This project is NOT ear-only. Both ear canal echo and voice/phrase modalities are required for best performance and security.**

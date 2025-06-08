@@ -12,23 +12,14 @@ import glob
 def extract_ear_canal_features(audio: np.ndarray, sr: int = 44100) -> Dict[str, float]:
     """
     Extract comprehensive features for ear canal biometric authentication.
-    
-    This function extracts multiple categories of features:
-    1. Enhanced MFCC features
-    2. Advanced spectral features
-    3. Wavelet-based features
-    4. Resonance frequency features
-    5. Statistical features
-    6. Temporal features
+    Optimized: Reuse STFT and magnitude for spectral features to reduce redundant computation.
     """
     features = {}
-    
+
     # 1. Enhanced MFCC Features (with derivatives)
-    mfccs = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=20)  # Increased from 13 to 20
+    mfccs = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=20)
     mfcc_delta = librosa.feature.delta(mfccs)
     mfcc_delta2 = librosa.feature.delta(mfccs, order=2)
-    
-    # MFCC statistics
     for i in range(mfccs.shape[0]):
         features[f'mfcc_{i+1}_mean'] = np.mean(mfccs[i])
         features[f'mfcc_{i+1}_std'] = np.std(mfccs[i])
@@ -36,19 +27,16 @@ def extract_ear_canal_features(audio: np.ndarray, sr: int = 44100) -> Dict[str, 
         features[f'mfcc_{i+1}_kurtosis'] = stats.kurtosis(mfccs[i])
         features[f'mfcc_{i+1}_delta_mean'] = np.mean(mfcc_delta[i])
         features[f'mfcc_{i+1}_delta2_mean'] = np.mean(mfcc_delta2[i])
-    
-    # 2. Advanced Spectral Features
+
+    # 2. Advanced Spectral Features (reuse STFT/magnitude)
     stft = librosa.stft(audio)
     magnitude = np.abs(stft)
-    
-    # Spectral features
-    spectral_centroids = librosa.feature.spectral_centroid(y=audio, sr=sr)[0]
-    spectral_rolloff = librosa.feature.spectral_rolloff(y=audio, sr=sr)[0]
-    spectral_bandwidth = librosa.feature.spectral_bandwidth(y=audio, sr=sr)[0]
-    spectral_contrast = librosa.feature.spectral_contrast(y=audio, sr=sr)
-    spectral_flatness = librosa.feature.spectral_flatness(y=audio)[0]
-    
-    # Spectral statistics
+    # Use magnitude for all spectral features that accept S/magnitude
+    spectral_centroids = librosa.feature.spectral_centroid(S=magnitude, sr=sr)[0]
+    spectral_rolloff = librosa.feature.spectral_rolloff(S=magnitude, sr=sr)[0]
+    spectral_bandwidth = librosa.feature.spectral_bandwidth(S=magnitude, sr=sr)[0]
+    spectral_contrast = librosa.feature.spectral_contrast(S=magnitude, sr=sr)
+    spectral_flatness = librosa.feature.spectral_flatness(S=magnitude)[0]
     features['spectral_centroid_mean'] = np.mean(spectral_centroids)
     features['spectral_centroid_std'] = np.std(spectral_centroids)
     features['spectral_rolloff_mean'] = np.mean(spectral_rolloff)
@@ -57,8 +45,6 @@ def extract_ear_canal_features(audio: np.ndarray, sr: int = 44100) -> Dict[str, 
     features['spectral_bandwidth_std'] = np.std(spectral_bandwidth)
     features['spectral_flatness_mean'] = np.mean(spectral_flatness)
     features['spectral_flatness_std'] = np.std(spectral_flatness)
-    
-    # Spectral contrast features (7 bands)
     for i in range(spectral_contrast.shape[0]):
         features[f'spectral_contrast_{i+1}_mean'] = np.mean(spectral_contrast[i])
         features[f'spectral_contrast_{i+1}_std'] = np.std(spectral_contrast[i])
@@ -151,6 +137,71 @@ def extract_ear_canal_features(audio: np.ndarray, sr: int = 44100) -> Dict[str, 
         features[f'chroma_{i+1}_mean'] = np.mean(chroma[i])
         features[f'chroma_{i+1}_std'] = np.std(chroma[i])
     
+    # 9. Advanced Voice Features (Formants, Pitch, Jitter, Shimmer, HNR)
+    # Only compute if audio is long enough
+    if len(audio) > sr // 2:
+        # Pitch (F0)
+        try:
+            pitches, magnitudes = librosa.piptrack(y=audio, sr=sr)
+            pitch_values = pitches[magnitudes > np.median(magnitudes)]
+            if len(pitch_values) > 0:
+                features['pitch_mean'] = np.mean(pitch_values)
+                features['pitch_std'] = np.std(pitch_values)
+            else:
+                features['pitch_mean'] = 0
+                features['pitch_std'] = 0
+        except Exception:
+            features['pitch_mean'] = 0
+            features['pitch_std'] = 0
+        # Formant estimation (simple LPC peak method)
+        try:
+            from scipy.signal import find_peaks
+            lpc_order = 12
+            lpc_coeffs = librosa.lpc(audio, order=lpc_order)
+            w, h = signal.freqz([1], lpc_coeffs, worN=512, fs=sr)
+            peaks, _ = find_peaks(-np.abs(h), distance=sr//2000)
+            formants = w[peaks][:4] if len(peaks) >= 4 else np.pad(w[peaks], (0, 4-len(peaks)), 'constant')
+            for i, f in enumerate(formants):
+                features[f'formant_{i+1}'] = f
+        except Exception:
+            for i in range(4):
+                features[f'formant_{i+1}'] = 0
+        # Jitter and shimmer (simple frame-to-frame variation)
+        try:
+            frame_length = int(0.03 * sr)
+            hop_length = int(0.015 * sr)
+            frames = librosa.util.frame(audio, frame_length=frame_length, hop_length=hop_length)
+            frame_amps = np.max(frames, axis=0) - np.min(frames, axis=0)
+            shimmer = np.std(frame_amps) / (np.mean(frame_amps) + 1e-6)
+            features['shimmer'] = shimmer
+            # Jitter: pitch period variation (approximate)
+            zero_crossings = librosa.zero_crossings(audio, pad=False)
+            zc_diff = np.diff(np.where(zero_crossings)[0])
+            if len(zc_diff) > 1:
+                jitter = np.std(zc_diff) / (np.mean(zc_diff) + 1e-6)
+            else:
+                jitter = 0
+            features['jitter'] = jitter
+        except Exception:
+            features['shimmer'] = 0
+            features['jitter'] = 0
+        # Harmonics-to-noise ratio (HNR, simple SNR proxy)
+        try:
+            S, phase = librosa.magphase(librosa.stft(audio))
+            harmonic = librosa.effects.harmonic(audio)
+            percussive = librosa.effects.percussive(audio)
+            hnr = np.mean(np.abs(harmonic)) / (np.mean(np.abs(percussive)) + 1e-6)
+            features['hnr'] = hnr
+        except Exception:
+            features['hnr'] = 0
+    else:
+        features['pitch_mean'] = 0
+        features['pitch_std'] = 0
+        for i in range(4):
+            features[f'formant_{i+1}'] = 0
+        features['shimmer'] = 0
+        features['jitter'] = 0
+        features['hnr'] = 0
     return features
 
 def extract_multimodal_features(audio: np.ndarray, sr: int = 44100) -> dict:

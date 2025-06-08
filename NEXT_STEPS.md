@@ -19,7 +19,7 @@
 ---
 
 ## Most Practical Next Steps
-1. **Implement late/hybrid fusion in your ML pipeline.**
+1. **(Done) Implement late/hybrid fusion in your ML pipeline.**
 2. **Add a simple liveness/occlusion test to your data collection.**
 3. **Prototype a CNN on spectrograms for either echo or voice.**
 4. **Add a noise reduction step to your feature extraction.**
@@ -28,13 +28,20 @@
 
 The following improvements are the most practical and impactful for your current project:
 
-1. **Late or Hybrid Modality Fusion**
-   - Train separate models for echo and voice, then combine their predictions (e.g., weighted average, voting, or meta-classifier).
-   - Update your ML pipeline to support this in both training and prediction scripts.
+1. **Late or Hybrid Modality Fusion (Already Implemented)**
+   - The system supports late/hybrid fusion: separate models for echo and voice are trained, and their predictions are combined (e.g., weighted average, voting, or meta-classifier).
+   - Both training and prediction scripts support all fusion modes (echo-only, voice-only, fused, late/hybrid fusion).
+   - This adds strong research novelty and ablation flexibility.
 
 2. **Liveness Detection (Ear Occlusion Test)**
-   - Add a prompt in your data collection script to record a sample with the earbud out, and compare energy/echo pattern to in-ear.
-   - If the echo pattern is too similar to open-air, flag as possible spoof.
+   - Already implemented: The data collection script prompts the user to record both in-ear and open-air (earbud out) samples in batches.
+   - Liveness is determined by comparing energy, spectral centroid, and resonance features between in-ear and open-air samples.
+   - A liveness score is computed and included as a feature for each sample.
+   - Outlier and soft/automated liveness classification (e.g., logistic regression) are used to flag possible spoofing or low-confidence samples.
+   - **Next steps:**
+     - Continue collecting more weak/ambiguous samples to improve liveness separation.
+     - Optionally, add more advanced features or classifiers for liveness.
+     - Review flagged outliers and refine thresholds as needed.
 
 3. **Deep Learning on Spectrograms**
    - Use librosa to generate mel-spectrograms from your `.wav` files.
