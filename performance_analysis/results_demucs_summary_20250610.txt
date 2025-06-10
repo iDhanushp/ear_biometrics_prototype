@@ -1,0 +1,43 @@
+# Model Training and Evaluation Results (Demucs Denoising)
+
+**Date:** 2025-06-10
+
+## Summary
+- Denoising mode: advanced (Demucs, ML-based)
+- Number of in-ear recordings: 436
+- Number of users: 11
+- Features extracted per recording: 269
+- Feature selection: RFE, 80 features selected
+
+## Test Accuracy (Best Model)
+- Echo-only: 0.1705 (ensemble)
+- Voice-only: 0.6705 (random_forest)
+- Fused: 0.7386 (ensemble)
+
+## Detailed Classification Report (Fused, Best Model)
+| User         | Precision | Recall | F1-score | Support |
+|--------------|-----------|--------|----------|---------|
+| Abhi         | 0.67      | 0.60   | 0.63     | 10      |
+| Ajmal        | 0.64      | 0.70   | 0.67     | 10      |
+| Akshar       | 0.75      | 1.00   | 0.86     | 6       |
+| Chetan       | 1.00      | 0.83   | 0.91     | 6       |
+| Deeksha      | 0.67      | 0.67   | 0.67     | 6       |
+| Deepak.S     | 0.55      | 0.60   | 0.57     | 10      |
+| Dhanush.P    | 1.00      | 1.00   | 1.00     | 9       |
+| Hassan       | 0.75      | 1.00   | 0.86     | 6       |
+| Rashmitha.P  | 1.00      | 1.00   | 1.00     | 9       |
+| Shakthi      | 0.75      | 0.50   | 0.60     | 6       |
+| lohith       | 0.50      | 0.40   | 0.44     | 10      |
+| **Overall**  |           |        | **0.74** | 88      |
+
+- Macro avg: Precision 0.75, Recall 0.75, F1-score 0.75
+- Weighted avg: Precision 0.74, Recall 0.74, F1-score 0.73
+
+## Notes
+- Echo-only accuracy is low, as expected with limited echo data.
+- Voice-only and fused models perform well, with fused (ensemble) achieving the best accuracy (0.7386).
+- Results are nearly identical to classical denoising for this dataset. Demucs did not provide a significant boost, but may help in noisier or more challenging conditions.
+
+---
+
+For further analysis, see generated plots and confusion matrices in the performance_analysis/ directory.

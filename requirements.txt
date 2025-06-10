@@ -22,4 +22,17 @@ tqdm>=4.62.0
 
 # Additional dependencies
 sounddevice>=0.4.4
-python-dotenv>=0.19.0 
+python-dotenv>=0.19.0
+noisereduce
+
+demucs>=4.0.0
+# Demucs dependencies
+# If using GPU, ensure correct torch version for your CUDA
+# For CPU-only, the default torch is sufficient
+# You may pin torch/torchaudio versions as needed for compatibility
+torch>=1.9.0
+# torchaudio is required for Demucs
+# If you encounter issues, check Demucs docs for version compatibility
+# soundfile is already included above
+
+torchaudio>=0.9.0

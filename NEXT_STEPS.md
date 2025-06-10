@@ -51,6 +51,10 @@ The following improvements are the most practical and impactful for your current
 4. **Adaptive Noise Handling**
    - Add a pre-processing step for noise reduction (e.g., spectral gating or RNNoise).
    - Integrate as a pre-processing step in your feature extraction pipeline.
+   - **Advanced denoising:**
+     - Experiment with ML-based denoisers such as RNNoise (C-based, can be wrapped in Python) or deep learning models (e.g., Demucs, DeepFilterNet).
+     - Compare performance of classical (spectral gating) and advanced (ML-based) denoising on your biometric features and model accuracy.
+     - If using advanced denoisers, document installation and integration steps for reproducibility.
 
 ---
 

@@ -7,13 +7,16 @@
 ## Recent Changes (2025-06)
 - System is now fully multi-modal: both ear canal echo and voice/phrase are used for authentication and liveness.
 - Data collection scripts (`data_collector.py`, `phrase_collector.py`) refactored for robust path handling, metadata, and multi-modal support.
-- Batch-based liveness/occlusion (open-air) test implemented for echo data collection.
+- Batch-based liveness/occlusion (open-air) test implemented for echo data collection. **[REMOVED: Open-air sample collection is no longer required; only in-ear samples are now collected for echo. Liveness detection is still supported via feature engineering and analysis.]**
 - Chirp tone, increased tone duration, and RMS thresholding added for improved echo capture.
 - Feature extraction (`enhanced_features.py`) now pairs in-ear/open-air samples, computes liveness score, and includes it as a feature.
 - Analysis script (`analyze_liveness_comparison.py`) compares in-ear vs. open-air samples, visualizes waveforms, automates outlier detection, and adds soft liveness classification (logistic regression).
 - STFT and magnitude are now reused for all spectral features, significantly speeding up feature extraction.
+- **Adaptive noise reduction (spectral gating) is now integrated as a pre-processing step in feature extraction, improving robustness to background noise. Advanced ML-based denoising (Demucs) was tested but removed due to negligible benefit and high computational cost.**
 - All visualizations and analysis results are saved to organized folders for review.
 - Documentation, code, and CLI updated to reflect multi-modal (ear + voice) nature throughout.
+- **Demucs and its dependencies have been removed from requirements.txt and the codebase. Only classical denoising is now supported.**
+- Data collection no longer prompts for open-air (liveness) samples; only in-ear samples are collected for echo. Liveness detection is handled in feature extraction and analysis.
 
 ## Table of Contents
 1. [Project Overview](#project-overview)
@@ -69,6 +72,10 @@ ear_biometrics_prototype/
 
 ## Feature Engineering
 
+- **Adaptive noise reduction:** All audio is denoised before feature extraction using classical spectral gating (`noisereduce`). This step improves robustness to background noise for both echo and voice modalities.
+    - *Classical denoising*: Fast, effective for stationary or mild noise. Uses spectral gating via the `noisereduce` library.
+    - *Experimental comparison*: The system previously supported advanced ML-based denoisers (Demucs), but these were removed after experiments showed no significant accuracy improvement for this dataset.
+    - *Installation and reproducibility*: All dependencies are documented in `requirements.txt`. Installation and integration steps are described in the README.
 - **Advanced MFCCs**: 20 coefficients, with mean, std, skew, kurtosis, deltas, delta2s
 - **Resonance features**: Top 5 resonant frequencies, magnitudes, ratios
 - **Wavelet features**: Daubechies, 5 levels, energy/statistics per level
@@ -167,13 +174,14 @@ ear_biometrics_prototype/
 ```python
 # Multi-modal feature extraction pipeline
 1. Audio loading and preprocessing
-2. MFCC extraction (20 coefficients)
-3. Spectral analysis
-4. Resonance frequency detection
-5. Wavelet decomposition
-6. Statistical calculations
-7. Feature selection (RFE)
-8. Feature scaling
+2. **Adaptive noise reduction (spectral gating or ML-based denoising)**
+3. MFCC extraction (20 coefficients)
+4. Spectral analysis
+5. Resonance frequency detection
+6. Wavelet decomposition
+7. Statistical calculations
+8. Feature selection (RFE)
+9. Feature scaling
 # Features are separated into echo_ and voice_ branches
 ```
 

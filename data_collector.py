@@ -95,49 +95,7 @@ def collect_samples(user_id: str, num_samples: int = 20, tone_duration: float = 
             print("Waiting 2 seconds before next sample...")
             time.sleep(2)
     
-    # Now collect all open-air (liveness) samples in a batch
-    print("\n[Batch Liveness] Please REMOVE the earbud now. Press Enter when ready to record open-air (liveness) samples...")
-    input()
-    for i in tqdm(range(num_samples), desc="Recording open-air samples"):
-        print(f"\nOpen-air sample {i+1}/{num_samples}")
-        print("Playing tone in 3...")
-        time.sleep(1)
-        print("2...")
-        time.sleep(1)
-        print("1...")
-        time.sleep(1)
-        # Play a cue beep (optional, 440 Hz, 0.2s)
-        sd.stop()
-        sd.play(cue_beep, samplerate=44100, blocking=True)
-        openair_echo = record_echo(tone, duration=record_duration, output_device=output_device)
-        
-        # Use the same timestamp and sample number as in-ear for pairing
-        # Find the corresponding in-ear meta file
-        inear_meta_files = sorted([f for f in os.listdir(echo_dir) if f.startswith(f"user_{user_id}_echo_") and f.endswith(f"_{i+1}_meta.json") and 'openair' not in f])
-        if inear_meta_files:
-            with open(os.path.join(echo_dir, inear_meta_files[0]), 'r') as f:
-                inear_meta = json.load(f)
-            timestamp = inear_meta['timestamp']
-        else:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        openair_base_filename = f"user_{user_id}_echo_{timestamp}_{i+1}_openair"
-        openair_wav_path = os.path.join(echo_dir, openair_base_filename + ".wav")
-        openair_meta_path = os.path.join(echo_dir, openair_base_filename + "_meta.json")
-        openair_metadata = {
-            "user_id": user_id,
-            "timestamp": timestamp,
-            "sample_number": i + 1,
-            "tone_duration": tone_duration,
-            "record_duration": record_duration,
-            "freq": freq,
-            "in_ear": False
-        }
-        save_recording_to_path(openair_echo, openair_wav_path, openair_meta_path, metadata=openair_metadata)
-
-        if i < num_samples - 1:
-            print("Waiting 2 seconds before next open-air sample...")
-            time.sleep(2)
-    print("\nYou may re-insert the earbud now. Liveness collection complete.")
+    print("\nIn-ear sample collection complete.")
 
 def main():
     parser = argparse.ArgumentParser(description="Collect ear canal echo samples for biometric authentication")

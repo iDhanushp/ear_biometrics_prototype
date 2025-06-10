@@ -1,0 +1,8 @@
+# Analysis of user_Abhi_echo_20250610_124330_1_openair_meta.json
+
+- This file is an open-air (not in-ear) echo sample metadata for user "Abhi".
+- Metadata fields: user_id, timestamp, sample_number, tone_duration, record_duration, freq, in_ear (false).
+- With the current pipeline (in-ear only), this file is not used for model training or prediction.
+- It may still be referenced by liveness analysis scripts for historical or research comparison.
+- The file is valid and well-formed.
+- Action: You may archive or delete this file if you want a clean in-ear-only dataset, or keep it for liveness research/analysis.

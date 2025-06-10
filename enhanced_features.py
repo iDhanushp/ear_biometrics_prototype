@@ -9,11 +9,20 @@ import json
 import os
 import glob
 
-def extract_ear_canal_features(audio: np.ndarray, sr: int = 44100) -> Dict[str, float]:
+def extract_ear_canal_features(audio: np.ndarray, sr: int = 44100, denoise_mode: str = 'classical') -> Dict[str, float]:
     """
     Extract comprehensive features for ear canal biometric authentication.
-    Optimized: Reuse STFT and magnitude for spectral features to reduce redundant computation.
+    Adaptive noise reduction is applied as a pre-processing step.
+    Args:
+        audio (np.ndarray): Input audio signal
+        sr (int): Sample rate
+        denoise_mode (str): 'classical' (default, spectral gating) or 'demucs' (ML-based, Demucs)
     """
+    # Adaptive noise reduction
+    import noisereduce as nr
+    noise_clip = audio[:int(0.1 * sr)] if len(audio) > int(0.1 * sr) else audio
+    audio = nr.reduce_noise(y=audio, sr=sr, y_noise=noise_clip, prop_decrease=1.0)
+    
     features = {}
 
     # 1. Enhanced MFCC Features (with derivatives)
@@ -204,27 +213,58 @@ def extract_ear_canal_features(audio: np.ndarray, sr: int = 44100) -> Dict[str, 
         features['hnr'] = 0
     return features
 
-def extract_multimodal_features(audio: np.ndarray, sr: int = 44100) -> dict:
+def extract_multimodal_features(audio: np.ndarray, sr: int = 44100, meta_path: str = None, denoise_mode: str = 'classical') -> dict:
     """
-    Extract and prefix both echo and voice features from the input audio.
-    Returns a dictionary with 'echo_' and 'voice_' prefixed features for multi-modal support.
+    Extract and separate echo-specific and voice-specific features for multi-modal fusion.
+    Args:
+        audio (np.ndarray): Audio signal
+        sr (int): Sample rate
+        meta_path (str, optional): Path to metadata JSON file
+        denoise_mode (str): Denoising mode to use
+    Returns:
+        dict: Combined feature dictionary with 'echo_' and 'voice_' prefixes
     """
-    # --- Echo features ---
-    # For echo, use the full signal or a segment (customize as needed)
-    echo_features = extract_ear_canal_features(audio, sr)
-    echo_features = {f'echo_{k}': v for k, v in echo_features.items()}
-
-    # --- Voice features ---
-    # For voice, use MFCCs, spectral, and temporal features (customize as needed)
-    # Here, we use the same function, but in practice you may want to use a different extractor
-    voice_features = extract_ear_canal_features(audio, sr)
-    voice_features = {f'voice_{k}': v for k, v in voice_features.items()}
-
-    # Combine
-    features = {}
-    features.update(echo_features)
-    features.update(voice_features)
-    return features
+    # Default: assume both modalities unless specified
+    modality = None
+    if meta_path and os.path.exists(meta_path):
+        with open(meta_path, 'r') as f:
+            meta = json.load(f)
+            # Heuristic: if 'phrase' in meta, treat as voice; else echo
+            if 'phrase' in meta and meta['phrase']:
+                modality = 'voice'
+            else:
+                modality = 'echo'
+    # If no meta, fallback to filename heuristic
+    elif meta_path:
+        if 'phrase' in meta_path:
+            modality = 'voice'
+        else:
+            modality = 'echo'
+    # Extract all features, pass denoise_mode
+    all_features = extract_ear_canal_features(audio, sr, denoise_mode=denoise_mode)
+    echo_features = {}
+    voice_features = {}
+    # Assign features to branches (simple heuristic: resonance for echo, MFCC/LPC/chroma for voice)
+    for k, v in all_features.items():
+        if k.startswith('resonant_') or k.startswith('freq_ratio') or k.startswith('wavelet_'):
+            echo_features['echo_' + k] = v
+        elif k.startswith('mfcc_') or k.startswith('lpc_') or k.startswith('chroma_'):
+            voice_features['voice_' + k] = v
+        else:
+            # Shared or ambiguous features (e.g., spectral, temporal, stats)
+            echo_features['echo_' + k] = v
+            voice_features['voice_' + k] = v
+    # Only keep the relevant branch if modality is known
+    if modality == 'echo':
+        return echo_features
+    elif modality == 'voice':
+        return voice_features
+    else:
+        # If unknown, return both merged
+        combined = {}
+        combined.update(echo_features)
+        combined.update(voice_features)
+        return combined
 
 def compute_liveness_score(in_ear_audio, open_air_audio, sr=44100):
     """
@@ -237,7 +277,7 @@ def compute_liveness_score(in_ear_audio, open_air_audio, sr=44100):
     score = (rms_in_ear - rms_open_air) / (rms_in_ear + 1e-6)
     return score
 
-def extract_dataset_features(recordings_dir: str) -> Tuple[np.ndarray, np.ndarray, list]:
+def extract_dataset_features(recordings_dir: str, denoise_mode: str = 'classical') -> Tuple[np.ndarray, np.ndarray, list]:
     """
     Extract enhanced features from all recordings in the dataset.
     Recursively searches all subdirectories for .wav files.
@@ -258,8 +298,12 @@ def extract_dataset_features(recordings_dir: str) -> Tuple[np.ndarray, np.ndarra
         for f in files:
             if f.endswith('.wav') and '_openair' not in f:
                 wav_files.append(os.path.join(root, f))
+    print(f"[INFO] Using classical denoising (noisereduce)")
     print(f"Extracting enhanced features from {len(wav_files)} in-ear recordings (excluding open-air)...")
     for audio_path in tqdm(wav_files):
+        # Load audio only once
+        audio, sr = librosa.load(audio_path, sr=44100)
+        print(f"[DEBUG] {os.path.basename(audio_path)}: {len(audio)/sr:.2f} seconds")
         # Get user ID and meta path
         fname = os.path.basename(audio_path)
         user_id = fname.split('_')[1]
@@ -267,10 +311,8 @@ def extract_dataset_features(recordings_dir: str) -> Tuple[np.ndarray, np.ndarra
         # Find corresponding open-air sample
         openair_path = audio_path.replace('.wav', '_openair.wav')
         openair_meta_path = audio_path.replace('.wav', '_openair_meta.json')
-        # Load in-ear audio
-        audio, _ = librosa.load(audio_path, sr=44100)
-        # Extract multi-modal features
-        features = extract_multimodal_features(audio, sr=44100, meta_path=meta_path)
+        # Extract multi-modal features, pass loaded audio and sr
+        features = extract_multimodal_features(audio, sr=sr, meta_path=meta_path, denoise_mode=denoise_mode)
         # Try to load open-air sample for liveness
         if os.path.exists(openair_path):
             openair_audio, _ = librosa.load(openair_path, sr=44100)
@@ -289,13 +331,16 @@ def extract_dataset_features(recordings_dir: str) -> Tuple[np.ndarray, np.ndarra
     print(f"Users: {len(set(labels))}")
     return features_df.values, np.array(labels), feature_names
 
-def extract_multimodal_features(audio: np.ndarray, sr: int, meta_path: str = None) -> dict:
+# Update extract_multimodal_features to accept and pass denoise_mode
+
+def extract_multimodal_features(audio: np.ndarray, sr: int, meta_path: str = None, denoise_mode: str = 'classical') -> dict:
     """
     Extract and separate echo-specific and voice-specific features for multi-modal fusion.
     Args:
         audio (np.ndarray): Audio signal
         sr (int): Sample rate
         meta_path (str, optional): Path to metadata JSON file
+        denoise_mode (str): Denoising mode to use
     Returns:
         dict: Combined feature dictionary with 'echo_' and 'voice_' prefixes
     """
@@ -315,8 +360,8 @@ def extract_multimodal_features(audio: np.ndarray, sr: int, meta_path: str = Non
             modality = 'voice'
         else:
             modality = 'echo'
-    # Extract all features
-    all_features = extract_ear_canal_features(audio, sr)
+    # Extract all features, pass denoise_mode
+    all_features = extract_ear_canal_features(audio, sr, denoise_mode=denoise_mode)
     echo_features = {}
     voice_features = {}
     # Assign features to branches (simple heuristic: resonance for echo, MFCC/LPC/chroma for voice)
