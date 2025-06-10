@@ -103,3 +103,7 @@ Each recording is saved as:
 ## Note
 
 **This project is NOT ear-only. Both ear canal echo and voice/phrase modalities are required for best performance and security.**
+
+## Note on Deep Learning
+
+As of June 2025, all deep learning scripts (CNN/LSTM) are archived due to poor performance on the current dataset. Please use the classical ML pipeline for robust results. See ARCHIVED_DEEP_LEARNING.md for details.

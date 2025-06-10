@@ -168,6 +168,14 @@ ear_biometrics_prototype/
 - Echo-only model has more confusion between similar users.
 - Fused and late fusion models reduce false positives/negatives.
 
+## Deep Learning Experiments: Summary and Outcome (2025-06-10)
+
+- Multiple deep learning approaches (CNN, LSTM) were implemented and tested on mel-spectrograms of both echo and voice modalities.
+- Despite extensive tuning (augmentation, batch normalization, early stopping, model depth), test accuracy remained very low (typically <25%).
+- Data/label integrity checks and visualizations did not reveal obvious errors, but results suggest the current dataset, label extraction, or spectrogram pipeline is not suitable for deep learning.
+- **Conclusion:** Deep learning is not effective for this dataset/modality at this time. The project will focus on classical ML models, which have shown more robust and reproducible results.
+- Deep learning scripts are retained for reference but are not recommended for use unless the dataset or pipeline is significantly improved.
+
 ## Technical Implementation
 
 ### Feature Extraction Process
