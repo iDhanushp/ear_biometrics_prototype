@@ -17,9 +17,10 @@ import json
 from scipy import signal
 import librosa
 
-def generate_chirp_tone(duration=0.5, sr=44100, f_start=500, f_end=4000):
+def generate_chirp_tone(duration=0.5, sr=44100, f_start=500, f_end=4000, amplitude=0.8):
     t = np.linspace(0, duration, int(sr * duration), endpoint=False)
     chirp = signal.chirp(t, f0=f_start, f1=f_end, t1=duration, method='linear')
+    chirp = chirp * amplitude
     return chirp.astype(np.float32)
 
 def collect_samples(user_id: str, num_samples: int = 20, tone_duration: float = 0.5,
@@ -55,7 +56,7 @@ def collect_samples(user_id: str, num_samples: int = 20, tone_duration: float = 
     # Open QA log CSV
     qa_log_path = os.path.join(echo_dir, f"qa_log_{user_id}.csv")
     with open(qa_log_path, "a") as qa_log:
-        qa_log.write("user_id,timestamp,sample_number,rms,centroid,liveness_score\n")
+        qa_log.write("user_id,timestamp,sample_number,rms,centroid,snr,liveness_score\n")
     
     # Collect all in-ear samples first
     sample_idx = 0
@@ -77,14 +78,18 @@ def collect_samples(user_id: str, num_samples: int = 20, tone_duration: float = 
             echo = record_echo(tone, duration=record_duration, output_device=output_device)
             rms = float(np.mean(librosa.feature.rms(y=echo)))
             centroid = float(np.mean(librosa.feature.spectral_centroid(y=echo, sr=44100)))
+            # Compute simple SNR (signal vs. first 50 ms)
+            noise_win = echo[:int(0.05 * 44100)]
+            signal_win = echo[int(0.05 * 44100):]
+            snr = 10 * np.log10(np.var(signal_win) / (np.var(noise_win) + 1e-9))
             # Liveness score (simple heuristic)
             liveness_score = (rms - 0.0005) * 1000 - abs(centroid - 700)/10
             # Save QA log
             with open(qa_log_path, "a") as qa_log:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                qa_log.write(f"{user_id},{timestamp},{sample_idx+1},{rms},{centroid},{liveness_score}\n")
-            if rms < 0.0005:
-                print(f"[Warning] Low RMS ({rms:.6f}) detected. Retrying sample {sample_idx+1}...")
+                qa_log.write(f"{user_id},{timestamp},{sample_idx+1},{rms},{centroid},{snr},{liveness_score}\n")
+            if rms < 0.0007 or snr < 10:
+                print(f"[Warning] Poor echo quality (RMS={rms:.6f}, SNR={snr:.2f} dB). Please reseat the ear-bud and stay still. Retrying sample {sample_idx+1}...")
                 attempts += 1
                 continue
             if liveness_score < -1:
@@ -103,7 +108,7 @@ def collect_samples(user_id: str, num_samples: int = 20, tone_duration: float = 
                 "in_ear": True
             }
             save_recording_to_path(echo, wav_path, meta_path, metadata=metadata)
-            print(f"[QA] Sample {sample_idx+1}: RMS={rms:.6f}, Centroid={centroid:.2f}, Liveness={liveness_score:.2f}")
+            print(f"[QA] Sample {sample_idx+1}: RMS={rms:.6f}, Centroid={centroid:.2f}, SNR={snr:.2f} dB, Liveness={liveness_score:.2f}")
             break  # Success, move to next sample
         else:
             print(f"[Error] Failed to collect valid sample {sample_idx+1} after 3 attempts. Skipping.")

@@ -9,7 +9,7 @@ from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from sklearn.feature_selection import SelectKBest, f_classif, RFE
+from sklearn.feature_selection import SelectKBest, f_classif, RFE, RFECV
 import matplotlib.pyplot as plt
 import seaborn as sns
 import joblib
@@ -17,6 +17,7 @@ from tqdm import tqdm
 import warnings
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils.class_weight import compute_class_weight
+from sklearn.utils.multiclass import unique_labels
 
 # Suppress convergence warnings for cleaner output
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
@@ -39,7 +40,13 @@ class EnhancedEarCanalClassifier:
         feature_mode: 'fused', 'echo', or 'voice'
         """
         print(f"=== Feature Extraction ({feature_mode}) ===")
-        X, y, self.feature_names = extract_dataset_features(recordings_dir)
+        X, y, self.feature_names = extract_dataset_features(recordings_dir, feature_mode=feature_mode)
+        # Debug: Print per-user sample counts before filtering
+        import collections
+        user_counts = collections.Counter(y)
+        print("Sample count per user BEFORE filtering:", dict(user_counts))
+        print("Total samples:", len(y))
+        print("Unique users:", len(user_counts))
         # Filter features by mode
         if feature_mode == 'echo':
             echo_cols = [i for i, name in enumerate(self.feature_names) if name.startswith('echo_')]
@@ -51,21 +58,33 @@ class EnhancedEarCanalClassifier:
             self.feature_names = [self.feature_names[i] for i in voice_cols]
         # else: fused (all features)
         y_encoded = self.label_encoder.fit_transform(y)
+        # Remove classes with fewer than 2 samples (required for stratified split)
+        unique_classes, class_counts = np.unique(y_encoded, return_counts=True)
+        valid_classes = unique_classes[class_counts >= 2]
+        if len(valid_classes) < len(unique_classes):
+            removed = set(unique_classes) - set(valid_classes)
+            print(f"[WARNING] Removed {len(removed)} user(s) with <2 recordings: {removed}")
+            mask = np.isin(y_encoded, valid_classes)
+            X = X[mask]
+            y_encoded = y_encoded[mask]
+        # Debug: Print per-user sample counts after filtering
+        user_counts_after = collections.Counter(y_encoded)
+        print("Sample count per user AFTER filtering:", dict(user_counts_after))
+        print("Total samples after filtering:", sum(user_counts_after.values()))
+        print("Unique users after filtering:", len(user_counts_after))
         X_train, X_test, y_train, y_test = train_test_split(
             X, y_encoded, test_size=test_size, random_state=42, stratify=y_encoded
         )
+        # Debug: Print per-user sample counts in train and test sets
+        print("Train set user counts:", dict(collections.Counter(y_train)))
+        print("Test set user counts:", dict(collections.Counter(y_test)))
         X_train_scaled = self.scaler.fit_transform(X_train)
         X_test_scaled = self.scaler.transform(X_test)
-        print(f"Training set: {X_train_scaled.shape}")
-        print(f"Test set: {X_test_scaled.shape}")
-        print(f"Number of features: {X_train_scaled.shape[1]}")
-        print(f"Number of users: {len(np.unique(y_encoded))}")
         return X_train_scaled, X_test_scaled, y_train, y_test
     
-    def feature_selection(self, X_train, y_train, method='rfe', k=50):
-        """Perform feature selection to reduce dimensionality."""
+    def feature_selection(self, X_train, y_train, method='rfe', k=50, cv=3):
+        """Perform feature selection to reduce dimensionality. Supports 'rfe', 'rfecv', and 'univariate'."""
         print(f"\n=== Feature Selection ({method.upper()}) ===")
-        
         if method == 'univariate':
             # Univariate feature selection
             self.feature_selector = SelectKBest(score_func=f_classif, k=k)
@@ -73,6 +92,12 @@ class EnhancedEarCanalClassifier:
             # Recursive feature elimination with Random Forest
             rf = RandomForestClassifier(n_estimators=50, random_state=42)
             self.feature_selector = RFE(estimator=rf, n_features_to_select=k)
+        elif method == 'rfecv':
+            # Recursive feature elimination with cross-validation
+            rf = RandomForestClassifier(n_estimators=50, random_state=42)
+            self.feature_selector = RFECV(estimator=rf, step=1, cv=cv, scoring='accuracy', min_features_to_select=10)
+        else:
+            raise ValueError(f"Unknown feature selection method: {method}")
         
         X_train_selected = self.feature_selector.fit_transform(X_train, y_train)
         
@@ -112,8 +137,9 @@ class EnhancedEarCanalClassifier:
                 'model': SVC(random_state=42, probability=True),
                 'params': {
                     'C': [0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 100],
-                    'kernel': ['rbf', 'linear'],
-                    'gamma': ['scale', 'auto', 0.01, 0.05, 0.1, 0.5, 2]
+                    'kernel': ['rbf', 'linear', 'poly', 'sigmoid'],
+                    'gamma': ['scale', 'auto', 0.001, 0.01, 0.05, 0.1, 0.5, 2, 10],
+                    'degree': [2, 3, 4]  # for poly kernel
                 }
             },
             'knn': {
@@ -127,13 +153,16 @@ class EnhancedEarCanalClassifier:
             'neural_network': {
                 'model': MLPClassifier(random_state=42),
                 'params': {
-                    'hidden_layer_sizes': [(50,), (100,), (100, 50), (200, 100), (256, 128, 64), (128, 128, 128)],
+                    'hidden_layer_sizes': [
+                        (50,), (100,), (100, 50), (200, 100), (256, 128, 64), (128, 128, 128),
+                        (256, 128, 64, 32), (128, 128, 128, 64)
+                    ],
                     'activation': ['relu', 'tanh'],
                     'solver': ['adam'],
                     'alpha': [1e-5, 0.0001, 0.001, 0.01],
                     'learning_rate_init': [0.0005, 0.001, 0.005],
                     'learning_rate': ['constant', 'adaptive'],
-                    'batch_size': ['auto', 32, 64],
+                    'batch_size': ['auto', 8, 16, 32],
                     'max_iter': [3000],
                     'early_stopping': [True]
                 }
@@ -243,10 +272,12 @@ class EnhancedEarCanalClassifier:
         """Create detailed analysis and visualizations."""
         print("\n=== Results Analysis ===")
         
-        # Classification report
+        # Only use user_names for classes present in y_test/y_pred
         user_names = self.label_encoder.classes_
+        present_labels = unique_labels(y_test, y_pred)
+        present_user_names = [user_names[i] for i in present_labels]
         print("\nDetailed Classification Report:")
-        print(classification_report(y_test, y_pred, target_names=user_names))
+        print(classification_report(y_test, y_pred, labels=present_labels, target_names=present_user_names))
         
         # Confusion matrix
         plt.figure(figsize=(12, 8))
@@ -358,6 +389,43 @@ class EnhancedEarCanalClassifier:
         print(f"Voice-only features: {len(voice_names)}")
         return X_echo, echo_names, X_voice, voice_names
 
+    def predict_with_voting(self, X_samples, window=3, voting='hard'):
+        """
+        Predict user label from multiple consecutive feature vectors using voting.
+        Args:
+            X_samples: np.ndarray of shape (n_samples, n_features) - consecutive recordings for a single authentication attempt
+            window: Number of samples to consider for voting (default: 3)
+            voting: 'hard' (majority vote) or 'soft' (average probabilities)
+        Returns:
+            predicted_label: predicted user label (decoded)
+            votes: list of predicted labels or probabilities
+        """
+        # Preprocess
+        X_scaled = self.scaler.transform(X_samples)
+        if self.feature_selector:
+            X_scaled = self.feature_selector.transform(X_scaled)
+        
+        if voting == 'hard':
+            preds = self.best_model.predict(X_scaled)
+            # Majority vote
+            from collections import Counter
+            vote_counts = Counter(preds)
+            majority_label = vote_counts.most_common(1)[0][0]
+            decoded_label = self.label_encoder.inverse_transform([majority_label])[0]
+            return decoded_label, preds
+        elif voting == 'soft' and hasattr(self.best_model, 'predict_proba'):
+            probas = self.best_model.predict_proba(X_scaled)
+            # Average probabilities over the voting window
+            if window > 1 and len(probas) >= window:
+                probas = np.mean(probas[-window:], axis=0)
+            else:
+                probas = np.mean(probas, axis=0)
+            best_idx = np.argmax(probas)
+            decoded_label = self.label_encoder.inverse_transform([best_idx])[0]
+            return decoded_label, probas
+        else:
+            raise ValueError("Voting must be 'hard' or 'soft' and model must support predict_proba for soft voting.")
+
 def train_and_evaluate_models(X_train, y_train, X_val, y_val, X_test, y_test, feature_set_name):
     # Classical models (SVM, RF, etc.)
     # ...existing code...
@@ -394,73 +462,76 @@ def train_and_evaluate_models(X_train, y_train, X_val, y_val, X_test, y_test, fe
     # ...existing code...
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description='Enhanced Ear Canal Biometric Training',
+        epilog='''\nTest-time voting options:\n  --voting: Enable prediction with voting over multiple samples.\n  --voting_window: Number of consecutive samples to use for voting (default: 3).\n  --voting_type: Voting method: majority or soft (default: majority).\n\nExample: python enhanced_train_model.py --feature_mode voice --voting --voting_window 5 --voting_type soft\n''',
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+    parser.add_argument('--feature_mode', choices=['fused', 'echo', 'voice'], default='fused',
+                       help='Feature mode: fused (default), echo, or voice')
+    parser.add_argument('--recordings_dir', default='recordings', 
+                       help='Directory containing recordings')
+    parser.add_argument('--feature_selection', choices=['rfe', 'rfecv', 'univariate'], default='rfe',
+                       help='Feature selection method: rfe (default), rfecv, or univariate')
+    parser.add_argument('--num_features', type=int, default=None,
+                       help='Number of features to select (ignored for rfecv)')
+    # Voting CLI arguments
+    parser.add_argument('--voting', action='store_true',
+                       help='Enable test-time voting for prediction (overrides normal evaluation)')
+    parser.add_argument('--voting_window', type=int, default=3,
+                       help='Number of consecutive samples to use for voting (default: 3)')
+    parser.add_argument('--voting_type', choices=['majority', 'soft'], default='majority',
+                       help='Voting method: majority or soft (default: majority)')
+    parser.add_argument('--voting_input', type=str, default=None,
+                       help='CSV file with features for voting prediction (optional)')
+    args = parser.parse_args()
     print("Enhanced Ear Canal Biometric Authentication System")
     print("=" * 60)
+    print(f"Feature mode: {args.feature_mode}")
     classifier = EnhancedEarCanalClassifier()
-    # Extract all features ONCE
-    X, y, feature_names = extract_dataset_features('recordings')
-    # Fused (main)
-    y_encoded = classifier.label_encoder.fit_transform(y)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded)
-    classifier.feature_names = feature_names
-    X_train_scaled = classifier.scaler.fit_transform(X_train)
-    X_test_scaled = classifier.scaler.transform(X_test)
-    # Split into echo-only and voice-only (STRICT: only use correct prefixes)
-    echo_indices = [i for i, name in enumerate(feature_names) if name.startswith('echo_')]
-    voice_indices = [i for i, name in enumerate(feature_names) if name.startswith('voice_')]
-    X_echo = X[:, echo_indices]
-    echo_names = [feature_names[i] for i in echo_indices]
-    X_voice = X[:, voice_indices]
-    voice_names = [feature_names[i] for i in voice_indices]
-    # Print feature counts for debug
-    print(f"Echo-only features: {len(echo_names)}")
-    print(f"Voice-only features: {len(voice_names)}")
-    # Split echo
-    X_echo_train, X_echo_test, y_echo_train, y_echo_test = train_test_split(
-        X_echo, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded)
-    scaler_echo = StandardScaler().fit(X_echo_train)
-    X_echo_train_scaled = scaler_echo.transform(X_echo_train)
-    X_echo_test_scaled = scaler_echo.transform(X_echo_test)
-    # Split voice
-    X_voice_train, X_voice_test, y_voice_train, y_voice_test = train_test_split(
-        X_voice, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded)
-    scaler_voice = StandardScaler().fit(X_voice_train)
-    X_voice_train_scaled = scaler_voice.transform(X_voice_train)
-    X_voice_test_scaled = scaler_voice.transform(X_voice_test)
-    # Feature selection (RFE, k=80 for all)
-    print("\n[Echo-only] Feature selection...")
-    selector_echo = RFE(RandomForestClassifier(n_estimators=50, random_state=42), n_features_to_select=40)
-    X_echo_train_sel = selector_echo.fit_transform(X_echo_train_scaled, y_echo_train)
-    X_echo_test_sel = selector_echo.transform(X_echo_test_scaled)
-    print("[Voice-only] Feature selection...")
-    selector_voice = RFE(RandomForestClassifier(n_estimators=50, random_state=42), n_features_to_select=40)
-    X_voice_train_sel = selector_voice.fit_transform(X_voice_train_scaled, y_voice_train)
-    X_voice_test_sel = selector_voice.transform(X_voice_test_scaled)
-    print("[Fused] Feature selection...")
-    X_train_sel = classifier.feature_selection(X_train_scaled, y_train, method='rfe', k=80)
-    X_test_sel = classifier.feature_selector.transform(X_test_scaled)
-    # Train and optimize models for each modality
-    print("\n[Echo-only] Training...")
-    best_echo = classifier.train_and_optimize(X_echo_train_sel, y_echo_train)
-    print("[Voice-only] Training...")
-    best_voice = classifier.train_and_optimize(X_voice_train_sel, y_voice_train)
-    print("[Fused] Training...")
-    best_fused = classifier.train_and_optimize(X_train_sel, y_train)
-    # Evaluate and save each
-    print("\n[Echo-only] Evaluation...")
-    results_echo, y_echo_test_final, y_echo_pred = classifier.evaluate_models(best_echo, X_echo_train_sel, X_echo_test_sel, y_echo_train, y_echo_test)
-    classifier.save_model(filename_prefix='enhanced_ear_biometric_echo')
-    print("[Voice-only] Evaluation...")
-    results_voice, y_voice_test_final, y_voice_pred = classifier.evaluate_models(best_voice, X_voice_train_sel, X_voice_test_sel, y_voice_train, y_voice_test)
-    classifier.save_model(filename_prefix='enhanced_ear_biometric_voice')
-    print("[Fused] Evaluation...")
-    results_fused, y_test_final, y_pred_final = classifier.evaluate_models(best_fused, X_train_sel, X_test_sel, y_train, y_test)
-    classifier.save_model(filename_prefix='enhanced_ear_biometric')
-    # Analyze results for fused (main)
-    classifier.analyze_results(results_fused, y_test_final, y_pred_final)
-    print("\n" + "=" * 60)
-    print("Enhanced training complete! Check the generated plots for detailed analysis.")
+    X_train, X_test, y_train, y_test = classifier.extract_and_prepare_data(
+        recordings_dir=args.recordings_dir, 
+        feature_mode=args.feature_mode
+    )
+    if X_train.shape[1] > 0:
+        if args.feature_selection == 'rfecv':
+            X_train_sel = classifier.feature_selection(X_train, y_train, method='rfecv', cv=3)
+            X_test_sel = classifier.feature_selector.transform(X_test)
+        else:
+            k_features = args.num_features if args.num_features is not None else min(50, X_train.shape[1] // 2)
+            X_train_sel = classifier.feature_selection(X_train, y_train, method=args.feature_selection, k=k_features)
+            X_test_sel = classifier.feature_selector.transform(X_test)
+        print(f"\nTraining {args.feature_mode} model...")
+        best_models = classifier.train_and_optimize(X_train_sel, y_train)
+        print(f"\nEvaluating {args.feature_mode} model...")
+        results, y_test_final, y_pred_final = classifier.evaluate_models(
+            best_models, X_train_sel, X_test_sel, y_train, y_test
+        )
+        classifier.save_model(filename_prefix=f'enhanced_ear_biometric_{args.feature_mode}')
+        classifier.analyze_results(results, y_test_final, y_pred_final)
+        print(f"\n{args.feature_mode.capitalize()} model training complete!")
+        # Test-time voting CLI
+        if args.voting:
+            print("\n=== Test-Time Voting Prediction ===")
+            if args.voting_input:
+                # Load features from CSV for voting
+                df = pd.read_csv(args.voting_input)
+                X_vote = df.values
+            else:
+                # Use X_test_sel as default
+                X_vote = X_test_sel
+            # Use best model for voting
+            y_vote_pred = classifier.predict_with_voting(
+                X_vote,
+                window=args.voting_window,
+                voting=args.voting_type
+            )
+            print(f"Voting predictions (window={args.voting_window}, type={args.voting_type}):\n{y_vote_pred}")
+    else:
+        print(f"ERROR: No {args.feature_mode} features found!")
+        print("This might be because:")
+        print("1. Your recordings don't have the required metadata for voice features")
+        print("2. The feature extraction didn't properly classify the modality")
+        print("3. The recordings need proper 'phrase' metadata for voice classification")
 
-if __name__ == "__main__":
-    main()

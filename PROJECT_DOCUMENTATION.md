@@ -18,6 +18,25 @@
 - **Demucs and its dependencies have been removed from requirements.txt and the codebase. Only classical denoising is now supported.**
 - Data collection no longer prompts for open-air (liveness) samples; only in-ear samples are collected for echo. Liveness detection is handled in feature extraction and analysis.
 - Echo Signal Simulation (Data Quality): Done. Echo signal quality simulation/checks are implemented in `data_collector.py` and are part of the QA logging and fallback pipeline. This ensures robust data quality and device-agnostic operation.
+- **Enhanced Echo Capture & Quality Control**: `data_collector.py` now uses an amplified chirp tone (amplitude 0.8) for better ear canal excitation. It also enforces stricter quality checks during recording, including a higher RMS threshold (0.0007) and a new Signal-to-Noise Ratio (SNR) threshold (10 dB). If quality is low, the script prompts the user to reseat the ear-bud and retries. RMS, centroid, and SNR are now logged in the QA CSV for detailed review.
+- **Automated Echo Recording Cleanup**: A new script `cleanup_echo_recordings.py` has been added. This utility scans the `recordings/echo` directory and automatically moves any low-quality echo recordings (based on RMS, spectral centroid, and SNR thresholds) to a `_rejected` subfolder. This helps ensure that only high-quality echo data is used for model training. The script also handles creation of necessary parent directories.
+- **Feature Extraction Quality Filtering**: `enhanced_features.py` now includes a filtering step during dataset creation. Echo recordings are automatically skipped if their `echo_rms_mean` is below `4e-4` or if their `echo_spectral_centroid_mean` deviates by more than `500 Hz` from the target `700 Hz`. This ensures that only good quality echo features contribute to the model training.
+
+## Recent Codebase Changes (June 2024)
+
+- **Command-line Arguments**: `enhanced_train_model.py` now supports `--feature_mode` (fused, echo, voice) and `--recordings_dir` for flexible training.
+- **Voice Feature Extraction**: The feature extraction pipeline now always extracts both echo and voice features from all recordings, regardless of metadata. This ensures voice features are available for training and evaluation.
+- **Expanded Voice Features**: Voice features now include MFCCs, LPC, chroma, pitch, formants, shimmer, jitter, and HNR, in addition to previously used features.
+- **User Filtering**: During data preparation, users with fewer than 2 samples are automatically removed to prevent errors during stratified train/test splitting.
+- **Classification Report Fix**: The results analysis now only reports on classes present in the test set, preventing errors if some users are filtered out.
+- **MLP Hyper-parameter Grid**: The neural network (MLP) model's `batch_size` hyper-parameter grid is now limited to ['auto', 8, 16, 32] to avoid warnings about batch size exceeding the number of samples in a fold.
+- **General Improvements**: Improved warning suppression, reporting, and code robustness for small or imbalanced datasets.
+
+## June 2025: Major Feature and Tuning Upgrades
+    - Added spectral entropy and spectral flux to feature extraction for improved voice discrimination.
+    - Feature selection now supports RFECV (recursive feature elimination with cross-validation) in addition to RFE and SelectKBest. CLI exposes --feature_selection and --num_features.
+    - SVM grid expanded to include poly/sigmoid kernels and more gamma/degree values. Neural network grid now supports deeper architectures.
+    - All new options are documented in CLI and usage instructions below.
 
 ## Table of Contents
 1. [Project Overview](#project-overview)
@@ -73,18 +92,9 @@ ear_biometrics_prototype/
 
 ## Feature Engineering
 
-- **Adaptive noise reduction:** All audio is denoised before feature extraction using classical spectral gating (`noisereduce`). This step improves robustness to background noise for both echo and voice modalities.
-    - *Classical denoising*: Fast, effective for stationary or mild noise. Uses spectral gating via the `noisereduce` library.
-    - *Experimental comparison*: The system previously supported advanced ML-based denoisers (Demucs), but these were removed after experiments showed no significant accuracy improvement for this dataset.
-    - *Installation and reproducibility*: All dependencies are documented in `requirements.txt`. Installation and integration steps are described in the README.
+- **Spectral entropy/flux**: Added as new features for voice (captures randomness and sharpness).
 - **Advanced MFCCs**: 20 coefficients, with mean, std, skew, kurtosis, deltas, delta2s
-- **Resonance features**: Top 5 resonant frequencies, magnitudes, ratios
-- **Wavelet features**: Daubechies, 5 levels, energy/statistics per level
-- **Spectral features**: Centroid, rolloff, bandwidth, contrast, flatness
-- **Temporal features**: Zero crossing, RMS, tempo, beat count
-- **Statistical features**: Mean, std, skew, kurtosis, entropy
-- **LPC features**: Linear prediction coefficients
-- **Chroma features**: 12 bands, mean/std
+- **Formant, pitch, jitter, HNR**: Already present for voice.
 - **Multi-modal separation**: All features are extracted for both echo and voice, with `echo_` and `voice_` prefixes.
 
 ## Multi-Modal Feature Extraction & Fusion
@@ -199,15 +209,16 @@ ear_biometrics_prototype/
 # Enhanced training process
 1. Data loading and preprocessing
 2. Feature extraction (multi-modal, echo/voice separation)
-3. Feature selection (RFE → 80 features)
+3. Feature selection (RFE, RFECV, or SelectKBest; CLI: --feature_selection, --num_features)
 4. Train/test split (stratified)
 5. Feature scaling
-6. Model training with grid search
+6. Model training with grid search (expanded SVM/NN grids)
 7. Cross-validation
 8. Model comparison
 9. Ensemble creation
 10. Final evaluation
 # Use --feature_mode to select echo, voice, fused, or late_fusion
+# Use --feature_selection and --num_features to tune feature selection
 ```
 
 ### Prediction Process
@@ -241,7 +252,7 @@ ear_biometrics_prototype/
 
 ## Usage Instructions
 
-### Training
+#### Training
 ```bash
 # Train with fused (default, early fusion)
 python enhanced_train_model.py
@@ -251,6 +262,12 @@ python enhanced_train_model.py --feature_mode echo
 python enhanced_train_model.py --feature_mode voice
 # Train with late/hybrid fusion
 python enhanced_train_model.py --feature_mode late_fusion
+# Train with RFECV feature selection
+python enhanced_train_model.py --feature_mode voice --feature_selection rfecv
+# Train with SelectKBest (univariate) and 30 features
+python enhanced_train_model.py --feature_mode voice --feature_selection univariate --num_features 30
+# Train with RFE and 80 features
+python enhanced_train_model.py --feature_mode voice --feature_selection rfe --num_features 80
 ```
 
 ### Prediction
@@ -269,6 +286,29 @@ python enhanced_predict.py recordings/audio_file.wav --feature_mode late_fusion
 # Extract features for all data
 python enhanced_features.py
 ```
+
+## Test-Time Voting via CLI
+
+Test-time voting is now fully supported via the CLI in `enhanced_train_model.py`. This allows robust authentication by aggregating predictions over multiple consecutive samples.
+
+### Usage
+
+Add the following arguments to your CLI command:
+
+- `--voting` : Enable prediction with voting over multiple samples (overrides normal evaluation)
+- `--voting_window N` : Number of consecutive samples to use for voting (default: 3)
+- `--voting_type {majority,soft}` : Voting method: majority (hard) or soft (probability average, default: majority)
+- `--voting_input PATH` : Optional CSV file with features for voting prediction (if not provided, uses the test set)
+
+### Example
+
+```sh
+python enhanced_train_model.py --feature_mode voice --voting --voting_window 5 --voting_type soft
+```
+
+This will run prediction with soft voting over windows of 5 samples each, using the best model found during training.
+
+See the CLI help (`-h` or `--help`) for more details and examples.
 
 ## Conclusion
 
