@@ -300,10 +300,11 @@ def extract_dataset_features(recordings_dir: str, denoise_mode: str = 'classical
                 wav_files.append(os.path.join(root, f))
     print(f"[INFO] Using classical denoising (noisereduce)")
     print(f"Extracting enhanced features from {len(wav_files)} in-ear recordings (excluding open-air)...")
-    for audio_path in tqdm(wav_files):
+    for audio_path in tqdm(wav_files, desc="Extracting features", disable=None):
         # Load audio only once
         audio, sr = librosa.load(audio_path, sr=44100)
-        print(f"[DEBUG] {os.path.basename(audio_path)}: {len(audio)/sr:.2f} seconds")
+        # Remove or comment out the detailed debug print
+        # print(f"[DEBUG] {os.path.basename(audio_path)}: {len(audio)/sr:.2f} seconds")
         # Get user ID and meta path
         fname = os.path.basename(audio_path)
         user_id = fname.split('_')[1]

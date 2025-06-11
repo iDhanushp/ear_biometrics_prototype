@@ -6,6 +6,22 @@ import sys
 import pandas as pd
 from enhanced_features import extract_ear_canal_features, extract_multimodal_features
 
+def score_echo_quality(rms, centroid):
+    """
+    Classify echo signal quality for fallback logic.
+    
+    Args:
+        rms (float): Echo RMS mean
+        centroid (float): Echo spectral centroid mean
+        
+    Returns:
+        str: "low" or "usable"
+    """
+    if rms < 0.0004 or abs(centroid - 700) > 500:
+        return "low"
+    else:
+        return "usable"
+
 class EnhancedEarCanalPredictor:
     def __init__(self, model_prefix='enhanced_ear_biometric', fusion_mode='fused'):
         """Load the enhanced trained model(s) and preprocessing components."""
@@ -42,16 +58,35 @@ class EnhancedEarCanalPredictor:
 
     def predict(self, audio_file_path, return_probabilities=False):
         """
-        Predict user identity from an audio file using the selected fusion mode.
+        Predict user identity from an audio file using the selected fusion mode or auto-fallback.
         """
         try:
             audio, sr = librosa.load(audio_file_path, sr=44100)
-            # Early fusion (fused features)
+            features = extract_multimodal_features(audio, sr)
+            feature_df = pd.DataFrame([features]).fillna(0)
+            feature_vector = feature_df.values
+            # --- Echo quality fallback logic ---
+            echo_rms = features.get('echo_rms_mean', None)
+            echo_centroid = features.get('echo_spectral_centroid_mean', None)
+            if echo_rms is not None and echo_centroid is not None and self.fusion_mode == 'fused':
+                quality = score_echo_quality(echo_rms, echo_centroid)
+                if quality == 'low':
+                    # Fallback to voice-only model
+                    voice_features = {k: v for k, v in features.items() if k.startswith('voice_')}
+                    voice_df = pd.DataFrame([voice_features]).fillna(0)
+                    voice_vec = voice_df.values
+                    voice_vec_scaled = self.voice_scaler.transform(voice_vec)
+                    voice_vec_final = self.voice_selector.transform(voice_vec_scaled)
+                    prediction = self.voice_model.predict(voice_vec_final)[0]
+                    predicted_user = self.voice_encoder.inverse_transform([prediction])[0]
+                    if return_probabilities and hasattr(self.voice_model, 'predict_proba'):
+                        probabilities = self.voice_model.predict_proba(voice_vec_final)[0]
+                        prob_dict = {user: prob for user, prob in zip(self.voice_encoder.classes_, probabilities)}
+                        return predicted_user, prob_dict
+                    return predicted_user
+                # else: usable, proceed with fused model below
+            # --- Fused model (default) ---
             if self.fusion_mode == 'fused':
-                features = extract_multimodal_features(audio, sr)
-                feature_df = pd.DataFrame([features])
-                feature_df = feature_df.fillna(0)
-                feature_vector = feature_df.values
                 feature_vector_scaled = self.scaler.transform(feature_vector)
                 if self.feature_selector:
                     feature_vector_final = self.feature_selector.transform(feature_vector_scaled)

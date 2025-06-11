@@ -17,6 +17,7 @@
 - Documentation, code, and CLI updated to reflect multi-modal (ear + voice) nature throughout.
 - **Demucs and its dependencies have been removed from requirements.txt and the codebase. Only classical denoising is now supported.**
 - Data collection no longer prompts for open-air (liveness) samples; only in-ear samples are collected for echo. Liveness detection is handled in feature extraction and analysis.
+- Echo Signal Simulation (Data Quality): Done. Echo signal quality simulation/checks are implemented in `data_collector.py` and are part of the QA logging and fallback pipeline. This ensures robust data quality and device-agnostic operation.
 
 ## Table of Contents
 1. [Project Overview](#project-overview)
@@ -274,3 +275,6 @@ python enhanced_features.py
 The system now supports robust, multi-modal authentication using both ear canal echo and voice. All fusion modes (echo-only, voice-only, fused, late/hybrid fusion) are implemented and validated. The architecture is research-ready, with strong performance, flexible experimentation, and clear documentation. Future improvements can further enhance security, accuracy, and real-world robustness.
 
 **Note:** This project is NOT ear-only. Both ear canal echo and voice/phrase modalities are required for best performance and security.
+
+- Hyperparameter tuning: The training pipeline now uses expanded hyperparameter grids for all models (SVM, Random Forest, Gradient Boosting, KNN, MLP) and supports both GridSearchCV (for best accuracy) and RandomizedSearchCV (for faster prototyping). This enables more robust model selection and improved accuracy, with the option to trade off speed and thoroughness as needed.
+- Ensembling: The system continues to use late/hybrid fusion and ensemble voting for maximum accuracy and robustness.

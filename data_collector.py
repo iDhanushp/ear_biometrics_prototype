@@ -52,46 +52,63 @@ def collect_samples(user_id: str, num_samples: int = 20, tone_duration: float = 
     print("If you did not hear the beep, check your audio device and press Enter to try again, or Ctrl+C to abort.")
     input()
     
+    # Open QA log CSV
+    qa_log_path = os.path.join(echo_dir, f"qa_log_{user_id}.csv")
+    with open(qa_log_path, "a") as qa_log:
+        qa_log.write("user_id,timestamp,sample_number,rms,centroid,liveness_score\n")
+    
     # Collect all in-ear samples first
-    for i in tqdm(range(num_samples), desc="Recording in-ear samples"):
-        print(f"\nSample {i+1}/{num_samples}")
-        print("Playing tone in 3...")
-        time.sleep(1)
-        print("2...")
-        time.sleep(1)
-        print("1...")
-        time.sleep(1)
-        # Play a cue beep (optional, 440 Hz, 0.2s)
-        sd.stop()
-        sd.play(cue_beep, samplerate=44100, blocking=True)
-        # Now play and record the test tone for echo capture
-        time.sleep(0.2)  # Pause before record
-        echo = record_echo(tone, duration=record_duration, output_device=output_device)
-        rms = float(np.mean(librosa.feature.rms(y=echo)))
-        if rms < 0.0005:
-            print(f"[Warning] Low RMS ({rms:.6f}) detected. Discarding sample {i+1}. Please adjust earbud and retry.")
-            continue
-        # Save recording
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        base_filename = f"user_{user_id}_echo_{timestamp}_{i+1}"
-        wav_path = os.path.join(echo_dir, base_filename + ".wav")
-        meta_path = os.path.join(echo_dir, base_filename + "_meta.json")
-        metadata = {
-            "user_id": user_id,
-            "timestamp": timestamp,
-            "sample_number": i + 1,
-            "tone_duration": tone_duration,
-            "record_duration": record_duration,
-            "freq": freq,
-            "in_ear": True
-        }
-        save_recording_to_path(echo, wav_path, meta_path, metadata=metadata)
-
-        # Log per-sample RMS and centroid for QA
-        centroid = float(np.mean(librosa.feature.spectral_centroid(y=echo, sr=44100)))
-        print(f"[QA] Sample {i+1}: RMS={rms:.6f}, Centroid={centroid:.2f}")
-
-        if i < num_samples - 1:
+    sample_idx = 0
+    while sample_idx < num_samples:
+        attempts = 0
+        while attempts < 3:
+            print(f"\nSample {sample_idx+1}/{num_samples} (Attempt {attempts+1}/3)")
+            print("Playing tone in 3...")
+            time.sleep(1)
+            print("2...")
+            time.sleep(1)
+            print("1...")
+            time.sleep(1)
+            # Play a cue beep (optional, 440 Hz, 0.2s)
+            sd.stop()
+            sd.play(cue_beep, samplerate=44100, blocking=True)
+            time.sleep(0.2)  # Pause before record
+            # Play and record echo (simultaneous play/rec assumed)
+            echo = record_echo(tone, duration=record_duration, output_device=output_device)
+            rms = float(np.mean(librosa.feature.rms(y=echo)))
+            centroid = float(np.mean(librosa.feature.spectral_centroid(y=echo, sr=44100)))
+            # Liveness score (simple heuristic)
+            liveness_score = (rms - 0.0005) * 1000 - abs(centroid - 700)/10
+            # Save QA log
+            with open(qa_log_path, "a") as qa_log:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                qa_log.write(f"{user_id},{timestamp},{sample_idx+1},{rms},{centroid},{liveness_score}\n")
+            if rms < 0.0005:
+                print(f"[Warning] Low RMS ({rms:.6f}) detected. Retrying sample {sample_idx+1}...")
+                attempts += 1
+                continue
+            if liveness_score < -1:
+                print("⚠️ Weak liveness score — possible spoof or echo fail.")
+            # Save recording
+            base_filename = f"user_{user_id}_echo_{timestamp}_{sample_idx+1:02d}"
+            wav_path = os.path.join(echo_dir, base_filename + ".wav")
+            meta_path = os.path.join(echo_dir, base_filename + "_meta.json")
+            metadata = {
+                "user_id": user_id,
+                "timestamp": timestamp,
+                "sample_number": sample_idx + 1,
+                "tone_duration": tone_duration,
+                "record_duration": record_duration,
+                "freq": freq,
+                "in_ear": True
+            }
+            save_recording_to_path(echo, wav_path, meta_path, metadata=metadata)
+            print(f"[QA] Sample {sample_idx+1}: RMS={rms:.6f}, Centroid={centroid:.2f}, Liveness={liveness_score:.2f}")
+            break  # Success, move to next sample
+        else:
+            print(f"[Error] Failed to collect valid sample {sample_idx+1} after 3 attempts. Skipping.")
+        sample_idx += 1
+        if sample_idx < num_samples:
             print("Waiting 2 seconds before next sample...")
             time.sleep(2)
     

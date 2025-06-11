@@ -2,7 +2,7 @@
 import os
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
 from sklearn.svm import SVC
@@ -15,7 +15,11 @@ import seaborn as sns
 import joblib
 from tqdm import tqdm
 import warnings
-warnings.filterwarnings('ignore')
+from sklearn.exceptions import ConvergenceWarning
+from sklearn.utils.class_weight import compute_class_weight
+
+# Suppress convergence warnings for cleaner output
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 # Import our enhanced feature extraction
 from enhanced_features import extract_dataset_features
@@ -89,76 +93,81 @@ class EnhancedEarCanalClassifier:
             'random_forest': {
                 'model': RandomForestClassifier(random_state=42),
                 'params': {
-                    'n_estimators': [100, 200, 300],
-                    'max_depth': [10, 20, None],
+                    'n_estimators': [100, 200, 300, 500],
+                    'max_depth': [10, 20, 30, None],
                     'min_samples_split': [2, 5, 10],
-                    'min_samples_leaf': [1, 2, 4]
+                    'min_samples_leaf': [1, 2, 4],
+                    'max_features': ['sqrt', 'log2', None]
                 }
             },
             'gradient_boosting': {
                 'model': GradientBoostingClassifier(random_state=42),
                 'params': {
-                    'n_estimators': [100, 200],
-                    'learning_rate': [0.05, 0.1, 0.2],
-                    'max_depth': [3, 5, 7]
+                    'n_estimators': [100, 200, 300],
+                    'learning_rate': [0.01, 0.05, 0.1, 0.2],
+                    'max_depth': [3, 5, 7, 10]
                 }
             },
             'svm': {
                 'model': SVC(random_state=42, probability=True),
                 'params': {
-                    'C': [0.1, 1, 10, 100],
+                    'C': [0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 100],
                     'kernel': ['rbf', 'linear'],
-                    'gamma': ['scale', 'auto']
+                    'gamma': ['scale', 'auto', 0.01, 0.05, 0.1, 0.5, 2]
                 }
             },
             'knn': {
                 'model': KNeighborsClassifier(),
                 'params': {
-                    'n_neighbors': [3, 5, 7, 9, 11],
+                    'n_neighbors': [3, 5, 7, 9, 11, 15],
                     'weights': ['uniform', 'distance'],
                     'metric': ['euclidean', 'manhattan']
                 }
             },
             'neural_network': {
-                'model': MLPClassifier(random_state=42, max_iter=1000),
+                'model': MLPClassifier(random_state=42),
                 'params': {
-                    'hidden_layer_sizes': [(50,), (100,), (50, 50), (100, 50)],
+                    'hidden_layer_sizes': [(50,), (100,), (100, 50), (200, 100), (256, 128, 64), (128, 128, 128)],
                     'activation': ['relu', 'tanh'],
-                    'learning_rate_init': [0.001, 0.01]
+                    'solver': ['adam'],
+                    'alpha': [1e-5, 0.0001, 0.001, 0.01],
+                    'learning_rate_init': [0.0005, 0.001, 0.005],
+                    'learning_rate': ['constant', 'adaptive'],
+                    'batch_size': ['auto', 32, 64],
+                    'max_iter': [3000],
+                    'early_stopping': [True]
                 }
             }
         }
     
-    def train_and_optimize(self, X_train, y_train, cv_folds=5):
-        """Train multiple models with hyperparameter optimization."""
+    def train_and_optimize(self, X_train, y_train, cv_folds=3):
+        """Train multiple models with hyperparameter optimization using GridSearchCV for all."""
         print("\n=== Model Training and Optimization ===")
-        
         self.define_models()
         best_models = {}
         
         for model_name, model_config in self.models.items():
             print(f"\nTraining {model_name}...")
             
-            # Grid search with cross-validation
-            grid_search = GridSearchCV(
+            search = GridSearchCV(
                 model_config['model'],
                 model_config['params'],
                 cv=cv_folds,
                 scoring='accuracy',
                 n_jobs=-1,
-                verbose=0
+                verbose=1
             )
             
-            grid_search.fit(X_train, y_train)
+            search.fit(X_train, y_train)
             
             best_models[model_name] = {
-                'model': grid_search.best_estimator_,
-                'best_params': grid_search.best_params_,
-                'cv_score': grid_search.best_score_
+                'model': search.best_estimator_,
+                'best_params': search.best_params_,
+                'cv_score': search.best_score_
             }
             
-            print(f"Best CV score: {grid_search.best_score_:.4f}")
-            print(f"Best params: {grid_search.best_params_}")
+            print(f"Best CV score: {search.best_score_:.4f}")
+            print(f"Best params: {search.best_params_}")
         
         return best_models
     
@@ -344,19 +353,69 @@ class EnhancedEarCanalClassifier:
         X_voice = X[:, voice_indices]
         echo_names = [feature_names[i] for i in echo_indices]
         voice_names = [feature_names[i] for i in voice_indices]
+        # Print feature counts for debug
+        print(f"Echo-only features: {len(echo_names)}")
+        print(f"Voice-only features: {len(voice_names)}")
         return X_echo, echo_names, X_voice, voice_names
+
+def train_and_evaluate_models(X_train, y_train, X_val, y_val, X_test, y_test, feature_set_name):
+    # Classical models (SVM, RF, etc.)
+    # ...existing code...
+
+    # Neural Network (MLP) - Improved settings
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
+    X_test_scaled = scaler.transform(X_test)
+
+    # Compute class weights for imbalanced data
+    classes = np.unique(y_train)
+    class_weights = compute_class_weight('balanced', classes=classes, y=y_train)
+    class_weight_dict = {cls: w for cls, w in zip(classes, class_weights)}
+
+    mlp_param_grid = {
+        'hidden_layer_sizes': [(100,), (100, 50), (200, 100), (256, 128, 64)],
+        'activation': ['relu', 'tanh'],
+        'solver': ['adam'],
+        'alpha': [0.0001, 0.001, 0.01],
+        'learning_rate_init': [0.001, 0.0005],
+        'max_iter': [3000],
+        'early_stopping': [True],
+        'random_state': [42]
+    }
+    from sklearn.model_selection import GridSearchCV
+    mlp = MLPClassifier()
+    mlp_grid = GridSearchCV(mlp, mlp_param_grid, cv=3, n_jobs=-1, verbose=1, scoring='accuracy')
+    mlp_grid.fit(X_train_scaled, y_train)
+    best_mlp = mlp_grid.best_estimator_
+    val_acc = best_mlp.score(X_val_scaled, y_val)
+    test_acc = best_mlp.score(X_test_scaled, y_test)
+    print(f"[MLP] {feature_set_name} | Val Acc: {val_acc:.3f} | Test Acc: {test_acc:.3f} | Best Params: {mlp_grid.best_params_}")
+    # ...existing code...
 
 def main():
     print("Enhanced Ear Canal Biometric Authentication System")
     print("=" * 60)
     classifier = EnhancedEarCanalClassifier()
-    # Extract and prepare data (fused)
-    X_train, X_test, y_train, y_test = classifier.extract_and_prepare_data()
-    # Split into echo-only and voice-only
+    # Extract all features ONCE
     X, y, feature_names = extract_dataset_features('recordings')
-    X_echo, echo_names, X_voice, voice_names = classifier.split_modalities(X, feature_names)
-    # Encode labels
+    # Fused (main)
     y_encoded = classifier.label_encoder.fit_transform(y)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded)
+    classifier.feature_names = feature_names
+    X_train_scaled = classifier.scaler.fit_transform(X_train)
+    X_test_scaled = classifier.scaler.transform(X_test)
+    # Split into echo-only and voice-only (STRICT: only use correct prefixes)
+    echo_indices = [i for i, name in enumerate(feature_names) if name.startswith('echo_')]
+    voice_indices = [i for i, name in enumerate(feature_names) if name.startswith('voice_')]
+    X_echo = X[:, echo_indices]
+    echo_names = [feature_names[i] for i in echo_indices]
+    X_voice = X[:, voice_indices]
+    voice_names = [feature_names[i] for i in voice_indices]
+    # Print feature counts for debug
+    print(f"Echo-only features: {len(echo_names)}")
+    print(f"Voice-only features: {len(voice_names)}")
     # Split echo
     X_echo_train, X_echo_test, y_echo_train, y_echo_test = train_test_split(
         X_echo, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded)
@@ -369,7 +428,6 @@ def main():
     scaler_voice = StandardScaler().fit(X_voice_train)
     X_voice_train_scaled = scaler_voice.transform(X_voice_train)
     X_voice_test_scaled = scaler_voice.transform(X_voice_test)
-    # Fused (already handled by classifier)
     # Feature selection (RFE, k=80 for all)
     print("\n[Echo-only] Feature selection...")
     selector_echo = RFE(RandomForestClassifier(n_estimators=50, random_state=42), n_features_to_select=40)
@@ -379,10 +437,9 @@ def main():
     selector_voice = RFE(RandomForestClassifier(n_estimators=50, random_state=42), n_features_to_select=40)
     X_voice_train_sel = selector_voice.fit_transform(X_voice_train_scaled, y_voice_train)
     X_voice_test_sel = selector_voice.transform(X_voice_test_scaled)
-    # Fused (as before)
     print("[Fused] Feature selection...")
-    X_train_sel = classifier.feature_selection(X_train, y_train, method='rfe', k=80)
-    X_test_sel = classifier.feature_selector.transform(X_test)
+    X_train_sel = classifier.feature_selection(X_train_scaled, y_train, method='rfe', k=80)
+    X_test_sel = classifier.feature_selector.transform(X_test_scaled)
     # Train and optimize models for each modality
     print("\n[Echo-only] Training...")
     best_echo = classifier.train_and_optimize(X_echo_train_sel, y_echo_train)
