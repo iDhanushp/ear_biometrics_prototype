@@ -120,6 +120,23 @@ Your ear canal biometric authentication system has been significantly enhanced, 
 9. Final Evaluation
 ```
 
+## EchoID TWS Hardware & Signal Compliance (2025-06)
+- **Chirp-based echo capture**: Linear chirp (500–4000 Hz, 0.5s) for robust ear canal resonance.
+- **Echo alignment**: All echo signals are aligned using cross-correlation to compensate for Bluetooth delay.
+- **Echo tail checks**: Only samples with ≥300ms usable echo tail after alignment are accepted.
+- **Lag offset and centroid shift**: Lag offset (ms) and spectral centroid shift are computed and logged for every echo sample.
+- **QA logging**: All quality metrics (RMS, centroid, SNR, lag, tail length, centroid shift) are logged per sample.
+- **Strict echo/voice separation**: All echo-specific checks and features are applied only to echo, never to voice.
+- **Device recommendations**: In-ear TWS earbuds with in-canal mics are required for best results; open-fit/inline-mic devices are discouraged.
+
+## Data Collection & Feature Extraction (Updated)
+- **Echo samples**: Collected with TWS earbuds, chirp tone, and robust QA. Echo tail is aligned and checked for length and quality.
+- **QA log**: Each sample logs RMS, centroid, SNR, lag offset, echo tail length, and centroid shift. Bad samples are auto-discarded.
+- **Voice samples**: Collected and processed separately, with no echo-specific checks applied.
+- **Echo features**: Extracted only from aligned echo tail, with lag offset, tail length, and centroid shift as additional features.
+- **Voice features**: Extracted independently; no echo alignment or echo-specific filtering is applied.
+- **Fusion**: Echo and voice features are never mixed at the feature engineering or filtering stage.
+
 ## Further Improvement Recommendations
 
 ### 1. Data Augmentation
@@ -221,4 +238,4 @@ python enhanced_features.py
 
 The enhanced ear canal biometric system represents a significant advancement in acoustic-based authentication. The 92% accuracy achieved demonstrates the viability of this approach for secure, contactless biometric authentication. With the recommended further improvements, accuracy could potentially reach 95-98%, making it suitable for high-security applications.
 
-The comprehensive feature engineering, advanced machine learning pipeline, and robust validation methodology provide a solid foundation for production deployment and future enhancements. 
+The comprehensive feature engineering, advanced machine learning pipeline, and robust validation methodology provide a solid foundation for production deployment and future enhancements.

@@ -1,0 +1,14 @@
+{
+  "user_id": "test",
+  "timestamp": "20250615_000537",
+  "sample_number": 3,
+  "tone_duration": 0.5,
+  "record_duration": 0.7,
+  "freq": 1000,
+  "in_ear": true,
+  "lag_offset_ms": -0.0625,
+  "echo_tail_ms": 5000.0,
+  "zcr": 0.145,
+  "decay": 0.00028404642946789336,
+  "rms": 0.22334760446445243
+}

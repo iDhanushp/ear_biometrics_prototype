@@ -154,15 +154,17 @@ class EnhancedEarCanalClassifier:
                 'model': MLPClassifier(random_state=42),
                 'params': {
                     'hidden_layer_sizes': [
+                        (32,), (64,), (128,), (256,), (512,),
                         (50,), (100,), (100, 50), (200, 100), (256, 128, 64), (128, 128, 128),
-                        (256, 128, 64, 32), (128, 128, 128, 64)
+                        (256, 128, 64, 32), (128, 128, 128, 64),
+                        (512, 256, 128), (256, 256, 128, 64), (128, 64, 32), (512, 256, 128, 64)
                     ],
-                    'activation': ['relu', 'tanh'],
-                    'solver': ['adam'],
-                    'alpha': [1e-5, 0.0001, 0.001, 0.01],
-                    'learning_rate_init': [0.0005, 0.001, 0.005],
-                    'learning_rate': ['constant', 'adaptive'],
-                    'batch_size': ['auto', 8, 16, 32],
+                    'activation': ['relu', 'tanh', 'logistic'],
+                    'solver': ['adam', 'sgd'],
+                    'alpha': [1e-6, 1e-5, 0.0001, 0.001, 0.01, 0.1],
+                    'learning_rate_init': [0.0001, 0.0005, 0.001, 0.005, 0.01],
+                    'learning_rate': ['constant', 'adaptive', 'invscaling'],
+                    'batch_size': ['auto', 8, 16, 32, 64],
                     'max_iter': [3000],
                     'early_stopping': [True]
                 }
@@ -534,4 +536,7 @@ def main():
         print("1. Your recordings don't have the required metadata for voice features")
         print("2. The feature extraction didn't properly classify the modality")
         print("3. The recordings need proper 'phrase' metadata for voice classification")
+
+if __name__ == "__main__":
+    main()
 

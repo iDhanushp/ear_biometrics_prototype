@@ -38,6 +38,58 @@
     - SVM grid expanded to include poly/sigmoid kernels and more gamma/degree values. Neural network grid now supports deeper architectures.
     - All new options are documented in CLI and usage instructions below.
 
+## June 2025: Major Pipeline, Device, and Robustness Upgrades
+
+### Echo Data Collection Pipeline: Implementation, Debugging, and Robust Tuning
+
+#### Key Changes & Solutions
+- **Full EchoID TWS Compliance:**
+  - Strict echo/voice separation, echo alignment, QA logging, and documentation updates.
+  - Chirp redesigned to 500–900 Hz, amplitude maximized, duration extended, 16kHz/44.1kHz/48kHz pipeline enforced, bandpass and smoothing added.
+  - Feature extraction switched to time-domain features (RMS, ZCR, decay, lag); QA log and checks updated.
+- **Device Selection & Handling:**
+  - Interactive and automatic device selection, fallback to system default, and robust error/debug output.
+  - Robust playback/recording logic with fallback, stereo enforcement, and device/channel info printing.
+  - Added code to always use output device 4 (Boult/Muff headphones), input device 2 (Boult/Muff mic), or other indices as needed, with fallback to other mics if needed.
+  - Added code to print and validate input device sample rate and format, and to force mono or stereo input as needed.
+  - Added code to clip audio before saving to WAV to prevent overflow warnings.
+  - Added debug output for raw echo stats and error handling for NaN/Inf.
+  - Pre-recording delay and longer recording duration added for Bluetooth latency; post-tone delay increased for robust echo tail capture.
+  - Code now supports and prints input device sample rate and format, and can force 16kHz/44.1kHz/48kHz input for Boult mic.
+  - Added "no playback" test mode and restored echo playback/recording logic with timing tweaks.
+  - Tool calls: `python -m sounddevice` (device listing), robust debug/validation code.
+- **Full-Duplex Streaming:**
+  - Switched to `sounddevice.Stream` with callback for professional, tightly synchronized playback and recording (like DAWs/games/calls).
+  - Uses stereo for playback and recording, processes only the first channel for echo.
+  - Pre-tone delay removed for efficiency; post-tone delay set to 3s for robust echo tail capture.
+- **Default Device Handling:**
+  - Added option to use system default input/output devices, or explicitly select devices (e.g., Microsoft Sound Mapper, Boult, laptop mic/speakers).
+  - Sample rates are always queried and matched to device capabilities.
+- **QA & Logging:**
+  - All raw echoes are saved for manual inspection.
+  - RMS threshold can be tuned for debugging; QA log includes all relevant metrics.
+
+#### Challenges Faced
+- **Bluetooth TWS on Windows:**
+  - Most Bluetooth TWS devices cannot do high-quality stereo playback and mic input simultaneously on Windows due to OS/driver limitations (Hands-Free Profile/HFP mode).
+  - Boult/Muff TWS mics often capture only the played tone, with very weak or no echo tail.
+  - Wired or built-in devices provide much better echo capture.
+- **Device Index Shifts:**
+  - Device indices change when devices are connected/disconnected; robust device listing and selection logic was required.
+- **Sample Rate Mismatches:**
+  - Many devices only support 48000 Hz or 44100 Hz; code now always queries and matches device sample rates.
+- **NaN/Inf in Recordings:**
+  - Caused by device/channel/sample rate mismatches or permissions; fixed by matching channels, checking permissions, and robust error handling.
+- **Echo Tail Capture:**
+  - If recording stops immediately after the tone, echo tail is lost; fixed by increasing post-tone delay.
+- **Low RMS/Signal:**
+  - Some devices (especially Bluetooth) produce low RMS; code now allows threshold tuning and always saves raw echoes for analysis.
+
+#### Summary
+- The system is now robust, EchoID TWS-compliant, and highly instrumented for debugging and QA, with special handling for Bluetooth quirks, Windows audio device issues, and fallback to laptop hardware.
+- Full-duplex streaming and device/sample rate auto-detection ensure maximum compatibility and data quality.
+- All changes, solutions, and challenges are documented for future reference and reproducibility.
+
 ## Table of Contents
 1. [Project Overview](#project-overview)
 2. [System Architecture](#system-architecture)
@@ -89,6 +141,22 @@ ear_biometrics_prototype/
 - **Robust path handling**: All parent directories are created as needed; filenames are unique and metadata is always saved.
 - **Device selection**: User can select input/output devices; channel handling is robust.
 - **Metadata**: Includes user ID, timestamp, device info, and recording parameters.
+
+## EchoID TWS Hardware & Signal Compliance
+
+This project now fully implements the EchoID TWS guide best practices:
+- **Chirp-based echo capture**: Linear chirp (500–4000 Hz, 0.5s) for robust ear canal resonance.
+- **Echo alignment**: All echo signals are aligned using cross-correlation to compensate for Bluetooth delay.
+- **Echo tail checks**: Only samples with ≥300ms usable echo tail after alignment are accepted.
+- **Lag offset and centroid shift**: Lag offset (ms) and spectral centroid shift are computed and logged for every echo sample.
+- **QA logging**: All quality metrics (RMS, centroid, SNR, lag, tail length, centroid shift) are logged per sample.
+- **Strict echo/voice separation**: All echo-specific checks and features are applied only to echo, never to voice.
+- **Device recommendations**: In-ear TWS earbuds with in-canal mics are required for best results; open-fit/inline-mic devices are discouraged.
+
+## Data Collection Process (Updated)
+- **Echo samples**: Collected with TWS earbuds, chirp tone, and robust QA. Echo tail is aligned and checked for length and quality.
+- **QA log**: Each sample logs RMS, centroid, SNR, lag offset, echo tail length, and centroid shift. Bad samples are auto-discarded.
+- **Voice samples**: Collected and processed separately, with no echo-specific checks applied.
 
 ## Feature Engineering
 
@@ -318,3 +386,30 @@ The system now supports robust, multi-modal authentication using both ear canal 
 
 - Hyperparameter tuning: The training pipeline now uses expanded hyperparameter grids for all models (SVM, Random Forest, Gradient Boosting, KNN, MLP) and supports both GridSearchCV (for best accuracy) and RandomizedSearchCV (for faster prototyping). This enables more robust model selection and improved accuracy, with the option to trade off speed and thoroughness as needed.
 - Ensembling: The system continues to use late/hybrid fusion and ensemble voting for maximum accuracy and robustness.
+
+## Hardware Requirements for Reliable Echo Biometrics (2025-06 Update)
+
+#### Key Finding
+- **Standard consumer earbuds, headphones (wired or wireless), and built-in laptop/PC microphones are NOT suitable for true ear canal echo capture.**
+- To reliably capture in-ear echoes, you need specialized hardware with a microphone physically inside the ear canal.
+
+#### Suitable Hardware Options
+- **Custom research earbuds** with in-canal mic and speaker (used in academic studies; not commercially available).
+- **Medical digital otoscopes** with audio/mic capability (can be adapted for echo experiments).
+- **Advanced hearing aids or custom in-ear monitors (IEMs)** with in-canal microphones (may require manufacturer or audiologist collaboration).
+- **DIY prototypes** using MEMS microphones and small speakers mounted on custom ear molds (requires electronics and fabrication skills).
+
+#### Not Suitable
+- Consumer Bluetooth TWS earbuds (Boult, Muff, etc.)
+- Wired headphones with inline mics
+- Built-in laptop microphones
+
+#### Why?
+- Microphones are not positioned inside the canal, so they cannot capture the true in-ear echo response.
+- Bluetooth/Windows limitations further reduce quality and echo capture capability.
+
+#### Recommendation
+- For research or deployment, collaborate with academic labs, audiology professionals, or medical device suppliers to access or build in-canal mic hardware.
+- For most users, only voice biometrics or other modalities are practical with standard audio devices.
+
+---

@@ -8,6 +8,7 @@ from typing import Dict, Tuple
 import json
 import os
 import glob
+from scipy.signal import correlate
 
 # Quality thresholds for filtering echo recordings during dataset creation
 ECHO_RMS_MIN = 4e-4  # recordings with lower RMS are discarded
@@ -65,7 +66,9 @@ def extract_ear_canal_features(audio: np.ndarray, sr: int = 44100, denoise_mode:
     
     # Spectral Entropy
     ps = np.abs(magnitude) ** 2
-    ps_norm = ps / np.sum(ps, axis=0, keepdims=True)
+    ps_sum = np.sum(ps, axis=0, keepdims=True)
+    ps_sum[ps_sum == 0] = 1e-10  # Prevent division by zero
+    ps_norm = ps / ps_sum
     spectral_entropy = -np.sum(ps_norm * np.log(ps_norm + 1e-10), axis=0)
     features['spectral_entropy_mean'] = np.mean(spectral_entropy)
     features['spectral_entropy_std'] = np.std(spectral_entropy)
@@ -279,6 +282,12 @@ def compute_liveness_score(in_ear_audio, open_air_audio, sr=44100):
     score = (rms_in_ear - rms_open_air) / (rms_in_ear + 1e-6)
     return score
 
+def align_echo(tone, recorded):
+    corr = correlate(recorded, tone, mode='full')
+    lag = np.argmax(corr) - len(tone)
+    aligned_tail = recorded[lag + len(tone):]
+    return aligned_tail, lag
+
 def extract_dataset_features(recordings_dir: str, denoise_mode: str = 'classical', feature_mode: str = 'fused') -> Tuple[np.ndarray, np.ndarray, list]:
     """
     Extract enhanced features from all recordings in the dataset.
@@ -303,24 +312,50 @@ def extract_dataset_features(recordings_dir: str, denoise_mode: str = 'classical
     print(f"[INFO] Using classical denoising (noisereduce)")
     print(f"Extracting enhanced features from {len(wav_files)} in-ear recordings (excluding open-air)...")
     for audio_path in tqdm(wav_files, desc="Extracting features", disable=None):
-        # Load audio only once
         audio, sr = librosa.load(audio_path, sr=44100)
         fname = os.path.basename(audio_path)
         user_id = fname.split('_')[1]
         meta_path = audio_path.replace('.wav', '_meta.json')
         openair_path = audio_path.replace('.wav', '_openair.wav')
         openair_meta_path = audio_path.replace('.wav', '_openair_meta.json')
-        features = extract_multimodal_features(audio, sr=sr, meta_path=meta_path, denoise_mode=denoise_mode)
-        # --- Quality filtering: discard recordings with weak or off-target echo ---
-        echo_rms = features.get('echo_rms_mean', 0.0)
-        echo_centroid = features.get('echo_spectral_centroid_mean', 0.0)
-        if feature_mode != 'voice':
+        # --- Echo alignment and echo-only checks ---
+        if 'echo' in audio_path and feature_mode != 'voice':
+            # Load chirp tone for alignment
+            from scipy import signal
+            tone = signal.chirp(np.linspace(0, 0.5, int(44100 * 0.5), endpoint=False), f0=500, f1=4000, t1=0.5, method='linear')
+            aligned_tail, lag = align_echo(tone, audio)
+            lag_offset_ms = 1000 * lag / 44100
+            echo_tail_ms = 1000 * len(aligned_tail) / 44100
+            # Spectral centroid shift
+            pre_chirp = audio[:len(tone)]
+            post_chirp = aligned_tail
+            centroid_pre = float(np.mean(librosa.feature.spectral_centroid(y=pre_chirp, sr=44100)))
+            centroid_post = float(np.mean(librosa.feature.spectral_centroid(y=post_chirp, sr=44100)))
+            centroid_shift = centroid_post - centroid_pre
+            # Only use aligned_tail for echo feature extraction
+            features = extract_multimodal_features(aligned_tail, sr=sr, meta_path=meta_path, denoise_mode=denoise_mode)
+            # Add alignment features to echo only
+            features['echo_lag_offset_ms'] = lag_offset_ms
+            features['echo_tail_ms'] = echo_tail_ms
+            features['echo_centroid_shift'] = centroid_shift
+            # Quality filtering for echo
+            echo_rms = features.get('echo_rms_mean', 0.0)
+            echo_centroid = features.get('echo_spectral_centroid_mean', 0.0)
             if echo_rms < ECHO_RMS_MIN:
                 print(f"[SKIP] {fname}: echo RMS too low ({echo_rms:.2e} < {ECHO_RMS_MIN:.2e})")
                 continue
             if abs(echo_centroid - ECHO_CENTROID_TARGET) > ECHO_CENTROID_TOLERANCE:
                 print(f"[SKIP] {fname}: echo centroid out of range ({echo_centroid:.1f} Hz, target {ECHO_CENTROID_TARGET}±{ECHO_CENTROID_TOLERANCE})")
                 continue
+            if echo_tail_ms < 300:
+                print(f"[SKIP] {fname}: echo tail < 300ms after alignment ({echo_tail_ms:.1f} ms)")
+                continue
+            if abs(centroid_shift) < 50:
+                print(f"[SKIP] {fname}: no significant spectral centroid shift after chirp ({centroid_shift:.1f})")
+                continue
+        else:
+            # For voice or non-echo, use original audio and skip echo-only checks
+            features = extract_multimodal_features(audio, sr=sr, meta_path=meta_path, denoise_mode=denoise_mode)
         # Try to load open-air sample for liveness
         if os.path.exists(openair_path):
             openair_audio, _ = librosa.load(openair_path, sr=44100)
